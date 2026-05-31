@@ -36,7 +36,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1045.0",
-    "@bull-board/api": "^6.19.0",
+    "@bull-board/api": "^7.1.5",
     "@bull-board/express": "^6.19.0",
     "@bull-board/nestjs": "^6.19.0",
     "@nestjs-modules/ioredis": "^2.0.2",
