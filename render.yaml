@@ -27,6 +27,8 @@ services:
         value: /usr/bin/chromium
       - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
         value: "true"
+      - key: REDIRECT_TO_DASHBOARD
+        value: "true"
     
     disks:
       - name: openwa-data

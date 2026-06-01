@@ -7,6 +7,7 @@ import { ShutdownService } from './common/services/shutdown.service';
 import * as dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as express from 'express';
 
 // Configuration loading order (later sources do NOT override earlier ones):
 //   1. Process env (Docker, shell, systemd) — highest priority
@@ -124,8 +125,20 @@ async function bootstrap() {
     maxAge: 86400, // 24 hours
   });
 
-  // Global prefix
+  // Global prefix - but we add dashboard routes BEFORE this
   app.setGlobalPrefix('api');
+
+  // Get raw Express app to add routes outside the prefix
+  const expressApp = app.getHttpAdapter().getInstance();
+  
+  // Serve dashboard static files at /dashboard
+  const dashboardPath = path.join(process.cwd(), 'dashboard-dist');
+  expressApp.use('/dashboard', express.static(dashboardPath));
+  
+  // Redirect root to dashboard
+  expressApp.get('/', (req: any, res: any) => {
+    res.redirect('/dashboard');
+  });
 
   // Enhanced Validation pipe with security options
   app.useGlobalPipes(
@@ -159,8 +172,7 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api/docs', app, document);
 
-  // Root API info endpoint - add as a simple route using raw Express
-  const expressApp = app.getHttpAdapter().getInstance();
+  // API root info endpoint
   expressApp.get('/api', (req: any, res: any) => {
     res.json({
       name: 'OpenWA API',
@@ -170,17 +182,8 @@ async function bootstrap() {
         health: '/api/health',
         docs: '/api/docs',
         sessions: '/api/sessions'
-      }
-    });
-  });
-
-  // Root redirect - redirect / to /api
-  expressApp.get('/', (req: any, res: any) => {
-    res.json({
-      message: 'Welcome to OpenWA API',
-      version: '0.1.6',
-      docs: '/api/docs',
-      info: '/api'
+      },
+      dashboard: '/dashboard'
     });
   });
 

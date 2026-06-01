@@ -1,5 +1,5 @@
 # OpenWA - Dockerfile
-# Multi-stage build for production-ready image
+# Multi-stage build for production-ready image with Dashboard
 
 # ===== Stage 1: Builder =====
 FROM node:22-slim AS builder
@@ -22,8 +22,11 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Build the application
+# Build the NestJS application
 RUN npm run build
+
+# Build the Dashboard
+RUN npm run dashboard:build
 
 # ===== Stage 2: Production =====
 FROM node:22-slim AS production
@@ -66,16 +69,15 @@ COPY package*.json ./
 # Install production dependencies only
 RUN npm ci --omit=dev && npm cache clean --force
 
-# Copy built application from builder stage
+# Copy built NestJS application from builder stage
 COPY --from=builder /app/dist ./dist
+
+# Copy built Dashboard from builder stage
+COPY --from=builder /app/dashboard/dist ./dashboard-dist
 
 # Create data directories with proper permissions
 RUN mkdir -p ./data/sessions ./data/media && \
     chown -R openwa:openwa /app
-
-# Note: Running as root to allow Docker socket access for orchestration
-# For production with stricter security, consider using a Docker socket proxy
-# USER openwa
 
 # Expose port
 EXPOSE 2785
