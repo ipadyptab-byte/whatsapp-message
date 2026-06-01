@@ -128,12 +128,17 @@ async function bootstrap() {
   // Global prefix for API routes
   app.setGlobalPrefix('api');
 
-  // Serve dashboard static files at /dashboard (bypasses /api prefix via raw Express)
+  // Serve dashboard static files at /dashboard
+  // Using app.use directly with a wrapper to handle the path
   const dashboardPath = path.join(process.cwd(), 'dashboard-dist');
-  const expressApp = app.getHttpAdapter().getInstance();
-  expressApp.use('/dashboard', express.static(dashboardPath));
+  app.use('/dashboard', (req: any, res: any, next: any) => {
+    // Strip /dashboard prefix for static files
+    req.url = req.url.replace(/^\/dashboard/, '');
+    express.static(dashboardPath)(req, res, next);
+  });
   
   // Redirect root to dashboard
+  const expressApp = app.getHttpAdapter().getInstance();
   expressApp.get('/', (req: any, res: any) => {
     res.redirect('/dashboard');
   });
