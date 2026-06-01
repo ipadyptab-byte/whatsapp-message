@@ -174,6 +174,16 @@ async function bootstrap() {
     });
   });
 
+  // Root redirect - redirect / to /api
+  expressApp.get('/', (req: any, res: any) => {
+    res.json({
+      message: 'Welcome to OpenWA API',
+      version: '0.1.6',
+      docs: '/api/docs',
+      info: '/api'
+    });
+  });
+
   const port = process.env.PORT || 2785;
   await app.listen(port);
 
