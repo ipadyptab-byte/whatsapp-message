@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ContactController } from './contact.controller';
 import { ContactService } from './contact.service';
@@ -8,7 +8,7 @@ import { SessionModule } from '../session/session.module';
 @Module({
   imports: [
     TypeOrmModule.forFeature([Contact], 'data'),
-    SessionModule,
+    forwardRef(() => SessionModule),
   ],
   controllers: [ContactController],
   providers: [ContactService],
