@@ -155,7 +155,22 @@ export function Sessions() {
       setQrData({ sessionId: id, sessionName, qrCode: qr.qrCode });
     } catch (err) {
       console.error('Failed to get QR:', err);
-      setError(t('sessions.qr.unavailable'));
+      // Try to start the session if QR fails
+      try {
+        await sessionApi.start(id);
+        // Wait a bit for QR to be generated
+        setTimeout(async () => {
+          try {
+            const qr = await sessionApi.getQR(id);
+            setQrData({ sessionId: id, sessionName, qrCode: qr.qrCode });
+          } catch {
+            setError(t('sessions.qr.unavailable'));
+          }
+        }, 3000);
+      } catch (startErr) {
+        console.error('Failed to start session:', startErr);
+        setError(t('sessions.qr.unavailable'));
+      }
     }
   };
 
