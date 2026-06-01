@@ -159,8 +159,9 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api/docs', app, document);
 
-  // Root API info endpoint
-  app.get('/api', (req, res) => {
+  // Root API info endpoint - add as a simple route using raw Express
+  const expressApp = app.getHttpAdapter().getInstance();
+  expressApp.get('/api', (req: any, res: any) => {
     res.json({
       name: 'OpenWA API',
       version: '0.1.6',
