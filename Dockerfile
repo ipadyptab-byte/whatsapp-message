@@ -25,8 +25,8 @@ COPY . .
 # Build the NestJS application
 RUN npm run build
 
-# Build the Dashboard
-RUN npm run dashboard:build
+# Install dashboard dependencies and build
+RUN cd dashboard && npm install && npm run build
 
 # ===== Stage 2: Production =====
 FROM node:22-slim AS production
