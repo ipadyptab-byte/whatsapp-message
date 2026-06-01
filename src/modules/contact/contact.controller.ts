@@ -1,11 +1,64 @@
-import { Controller, Get, Post, Delete, Param, HttpCode, HttpStatus } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
+import { Controller, Get, Post, Delete, Param, Body, Query, UseInterceptors, UploadedFile, HttpCode, HttpStatus } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiConsumes, ApiBody } from '@nestjs/swagger';
+import { ContactService } from './contact.service';
+import { ImportContactsDto } from './dto/import-contacts.dto';
 import { SessionService } from '../session/session.service';
 
 @ApiTags('contacts')
 @Controller('sessions/:sessionId/contacts')
 export class ContactController {
-  constructor(private readonly sessionService: SessionService) {}
+  constructor(
+    private readonly contactService: ContactService,
+    private readonly sessionService: SessionService,
+  ) {}
+
+  @Post('import')
+  @ApiOperation({ summary: 'Import contacts from JSON array' })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiResponse({ status: 201, description: 'Contacts imported successfully' })
+  async importContacts(@Param('sessionId') sessionId: string, @Body() dto: ImportContactsDto) {
+    const results = await this.contactService.importContacts(sessionId, dto.contacts);
+    return {
+      total: dto.contacts.length,
+      imported: results.filter(r => r.imported).length,
+      failed: results.filter(r => !r.imported).length,
+      results,
+    };
+  }
+
+  @Post('import/excel')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiOperation({ summary: 'Import contacts from Excel/CSV file' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', format: 'binary' },
+      },
+    },
+  })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiResponse({ status: 201, description: 'Contacts imported from file' })
+  async importFromExcel(
+    @Param('sessionId') sessionId: string,
+    @UploadedFile() file: any,
+  ) {
+    if (!file) {
+      throw new Error('No file uploaded');
+    }
+
+    const contacts = this.contactService.parseExcelFile(file.buffer);
+    const results = await this.contactService.importContacts(sessionId, contacts);
+
+    return {
+      total: contacts.length,
+      imported: results.filter(r => r.imported).length,
+      failed: results.filter(r => !r.imported).length,
+      results,
+    };
+  }
 
   @Get()
   @ApiOperation({ summary: 'Get all contacts for a session' })

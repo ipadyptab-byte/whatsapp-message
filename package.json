@@ -65,7 +65,8 @@
     "tar-stream": "^3.2.0",
     "typeorm": "^0.3.29",
     "uuid": "^11.0.5",
-    "whatsapp-web.js": "^1.26.1-alpha.3"
+    "whatsapp-web.js": "^1.26.1-alpha.3",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
