@@ -159,6 +159,20 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api/docs', app, document);
 
+  // Root API info endpoint
+  app.get('/api', (req, res) => {
+    res.json({
+      name: 'OpenWA API',
+      version: '0.1.6',
+      description: 'Open Source WhatsApp API Gateway',
+      endpoints: {
+        health: '/api/health',
+        docs: '/api/docs',
+        sessions: '/api/sessions'
+      }
+    });
+  });
+
   const port = process.env.PORT || 2785;
   await app.listen(port);
 
