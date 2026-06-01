@@ -56,6 +56,7 @@
   "nav": {
     "dashboard": "דאשבורד",
     "sessions": "Sessions",
+    "contacts": "אנשי קשר",
     "webhooks": "Webhooks",
     "apiKeys": "מפתחות API",
     "messageTester": "בדיקת הודעות",
@@ -507,6 +508,45 @@
       "savedTitle": "התצורה נשמרה",
       "savedDesc": "נדרש אתחול שרת כדי להחיל את השינויים.",
       "saveFailed": "השמירה נכשלה"
+    }
+  },
+  "contacts": {
+    "title": "אנשי קשר",
+    "subtitle": "ניהול וייבוא אנשי קשר מקובץ Excel או CSV",
+    "session": "סשן",
+    "selectSession": "בחר סשן...",
+    "searchPlaceholder": "חיפוש אנשי קשר...",
+    "import": "ייבוא",
+    "export": "ייצוא",
+    "selectSessionPrompt": "בחר סשן",
+    "selectSessionHint": "בחר סשן WhatsApp לניהול אנשי קשר",
+    "noResults": "אין תוצאות",
+    "noResultsHint": "נסה מונח חיפוש אחר",
+    "empty": {
+      "title": "אין עדיין אנשי קשר",
+      "description": "ייבא אנשי קשר מקובץ Excel או CSV כדי להתחיל"
+    },
+    "columns": {
+      "number": "מספר טלפון",
+      "name": "שם",
+      "notes": "הערות",
+      "whatsApp": "וואטסאפ",
+      "created": "נוצר",
+      "actions": "פעולות"
+    },
+    "yes": "כן",
+    "no": "לא",
+    "stats": "מציג {{count}} מתוך {{total}} אנשי קשר",
+    "import": {
+      "success": "הייבוא הושלם",
+      "successCount": "{{count}} יובאו",
+      "failedCount": "{{count}} נכשלו",
+      "error": "הייבוא נכשל",
+      "results": "תוצאות הייבוא"
+    },
+    "delete": {
+      "success": "איש הקשר נמחק",
+      "error": "מחיקת איש הקשר נכשלה"
     }
   }
 }

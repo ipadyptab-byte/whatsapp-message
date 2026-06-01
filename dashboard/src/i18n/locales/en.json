@@ -56,6 +56,7 @@
   "nav": {
     "dashboard": "Dashboard",
     "sessions": "Sessions",
+    "contacts": "Contacts",
     "webhooks": "Webhooks",
     "apiKeys": "API Keys",
     "messageTester": "Message Tester",
@@ -507,6 +508,45 @@
       "savedTitle": "Configuration Saved",
       "savedDesc": "Server restart required to apply changes.",
       "saveFailed": "Save Failed"
+    }
+  },
+  "contacts": {
+    "title": "Contacts",
+    "subtitle": "Manage and import contacts from Excel or CSV files",
+    "session": "Session",
+    "selectSession": "Select a session...",
+    "searchPlaceholder": "Search contacts...",
+    "import": "Import",
+    "export": "Export",
+    "selectSessionPrompt": "Select a Session",
+    "selectSessionHint": "Choose a WhatsApp session to manage contacts",
+    "noResults": "No Results",
+    "noResultsHint": "Try a different search term",
+    "empty": {
+      "title": "No Contacts Yet",
+      "description": "Import contacts from an Excel or CSV file to get started"
+    },
+    "columns": {
+      "number": "Phone Number",
+      "name": "Name",
+      "notes": "Notes",
+      "whatsApp": "WhatsApp",
+      "created": "Created",
+      "actions": "Actions"
+    },
+    "yes": "Yes",
+    "no": "No",
+    "stats": "Showing {{count}} of {{total}} contacts",
+    "import": {
+      "success": "Import Complete",
+      "successCount": "{{count}} imported",
+      "failedCount": "{{count}} failed",
+      "error": "Import Failed",
+      "results": "Import Results"
+    },
+    "delete": {
+      "success": "Contact deleted",
+      "error": "Failed to delete contact"
     }
   }
 }
