@@ -125,20 +125,20 @@ async function bootstrap() {
     maxAge: 86400, // 24 hours
   });
 
-  // Global prefix - but we add dashboard routes BEFORE this
+  // Global prefix for API routes
   app.setGlobalPrefix('api');
 
-  // Get raw Express app to add routes outside the prefix
-  const expressApp = app.getHttpAdapter().getInstance();
-  
-  // Serve dashboard static files at /dashboard
+  // Serve dashboard static files at /dashboard (bypasses /api prefix via raw Express)
   const dashboardPath = path.join(process.cwd(), 'dashboard-dist');
+  const expressApp = app.getHttpAdapter().getInstance();
   expressApp.use('/dashboard', express.static(dashboardPath));
   
   // Redirect root to dashboard
   expressApp.get('/', (req: any, res: any) => {
     res.redirect('/dashboard');
   });
+
+  // Enhanced Security Headers
 
   // Enhanced Validation pipe with security options
   app.useGlobalPipes(
