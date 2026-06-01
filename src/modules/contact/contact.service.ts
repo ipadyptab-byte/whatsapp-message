@@ -8,7 +8,7 @@ import { ContactDto, ContactResponseDto } from './dto/import-contacts.dto';
 @Injectable()
 export class ContactService {
   constructor(
-    @InjectRepository(Contact)
+    @InjectRepository(Contact, 'data')
     private readonly contactRepository: Repository<Contact>,
   ) {}
 

@@ -7,7 +7,7 @@ import { SessionModule } from '../session/session.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Contact]),
+    TypeOrmModule.forFeature([Contact], 'data'),
     SessionModule,
   ],
   controllers: [ContactController],
