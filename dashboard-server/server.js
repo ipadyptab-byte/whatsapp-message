@@ -3,10 +3,19 @@ const { createProxyMiddleware } = require('http-proxy-middleware');
 const path = require('path');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 
 // API Backend URL - use environment variable or default
-const API_URL = process.env.API_URL || 'https://whatsapp-message-api.onrender.com';
+const API_URL = process.env.API_URL || 'http://localhost:2785';
+
+console.log('Starting server...');
+console.log('API URL:', API_URL);
+console.log('Serving static files from:', path.join(__dirname, '../dashboard/dist'));
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
 
 // Serve static files from the dashboard build
 app.use(express.static(path.join(__dirname, '../dashboard/dist')));
