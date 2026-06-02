@@ -139,7 +139,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
           executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
         },
         webVersionCache: {
-          type: 'none',
+          type: 'local',
         },
       });
 
