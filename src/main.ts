@@ -138,8 +138,23 @@ async function bootstrap() {
     express.static(dashboardPath)(req, res, next);
   });
   
-  // Redirect root to dashboard
+
+  // Serve dashboard for any non-API routes (SPA fallback)
   const expressApp = app.getHttpAdapter().getInstance();
+  expressApp.use((req: any, res: any, next: any) => {
+    // Only handle GET requests to non-API paths
+    if (req.method === 'GET' && !req.url.startsWith('/api')) {
+      // Check if it's a file request (has extension)
+      const hasExtension = /\.\w+$/.test(req.url);
+      if (!hasExtension && !req.url.startsWith('/dashboard')) {
+        // This is likely a SPA route - redirect to dashboard
+        return res.redirect('/dashboard' + req.url);
+      }
+    }
+    next();
+  });
+
+  // Redirect root to dashboard
   expressApp.get('/', (req: any, res: any) => {
     res.redirect('/dashboard');
   });
