@@ -1,0 +1,73 @@
+# Render Blueprint - Auto-deployments for OpenWA
+# https://render.com/docs/blueprint-spec
+
+services:
+  # API Backend - Deploy this first
+  - type: web
+    name: whatsapp-message-api
+    env: node
+    region: oregon
+    plan: starter
+    buildCommand: npm install && npm run build
+    startCommand: node dist/main
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: DATABASE_TYPE
+        value: sqlite
+      - key: DATABASE_NAME
+        value: /data/openwa.sqlite
+      - key: SESSION_DATA_PATH
+        value: /data/sessions
+      - key: PUPPETEER_HEADLESS
+        value: "true"
+      - key: PUPPETEER_ARGS
+        value: "--no-sandbox,--disable-setuid-sandbox,--disable-dev-shm-usage"
+      - key: STORAGE_TYPE
+        value: local
+      - key: STORAGE_LOCAL_PATH
+        value: /data/media
+    disk:
+      name: openwa-data
+      mountPath: /data
+      sizeGB: 1
+
+  # Dashboard Frontend - Static Site
+  - type: web
+    name: whatsapp-message-dashboard
+    env: static
+    rootDir: dashboard
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    headers:
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
+        fromService:
+          name: whatsapp-message-api
+          envVarKey: RENDER_EXTERNAL_URL
+        value: /api
+      - key: VITE_WS_URL
+        fromService:
+          name: whatsapp-message-api
+          envVarKey: RENDER_EXTERNAL_URL
+        value: /socket.io
+
+  # PostgreSQL Database (Optional - for production)
+  - type: psql
+    name: openwa-database
+    plan: starter
+    databaseName: openwa
+    ipAllowList: []
