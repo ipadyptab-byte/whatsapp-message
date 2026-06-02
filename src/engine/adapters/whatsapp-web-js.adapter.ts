@@ -74,28 +74,10 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
         '--disable-gpu',
         '--disable-software-rasterizer',
         '--disable-web-security',
-        '--disable-features=IsolateOrigins,site-per-process',
-        '--host-resolver-rules=MAP *:443 127.0.0.1:443,MAP *:80 127.0.0.1:80',
         '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows',
-        '--disable-breakpad',
-        '--disable-component-extensions-with-background-pages',
-        '--disable-default-apps',
-        '--disable-extensions',
-        '--disable-hang-monitor',
-        '--disable-ipc-flooding-protection',
-        '--disable-renderer-backgrounding',
-        '--enable-features=NetworkService,NetworkServiceInProcess',
-        '--force-color-profile=srgb',
-        '--metrics-recording-only',
-        '--mute-audio',
       ];
 
       // Add proxy configuration if provided
@@ -139,7 +121,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
           executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
         },
         webVersionCache: {
-          type: 'local',
+          type: 'none',
         },
       });
 
