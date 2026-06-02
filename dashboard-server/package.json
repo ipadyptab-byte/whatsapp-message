@@ -1,0 +1,14 @@
+{
+  "name": "dashboard-server",
+  "version": "1.0.0",
+  "description": "Server to serve dashboard with API proxy",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "build": "cd ../dashboard && npm install && npm run build"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "http-proxy-middleware": "^2.0.6"
+  }
+}
