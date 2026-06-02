@@ -209,14 +209,14 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
    * Emit session status change
    */
   emitSessionStatus(sessionId: string, status: string, data?: Record<string, unknown>) {
-    this.emitToRooms(sessionId, 'session.status', { status, ...data });
+    this.emitToRooms(sessionId, 'session:status', { status, ...data });
   }
 
   /**
    * Emit QR code update for a session
    */
   emitQRCode(sessionId: string, qrCode: string) {
-    this.emitToRooms(sessionId, 'session.qr', { qrCode });
+    this.emitToRooms(sessionId, 'session:qr', { qrCode });
   }
 
   /**
