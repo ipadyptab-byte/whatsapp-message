@@ -143,10 +143,22 @@ export class SessionService implements OnModuleDestroy, OnModuleInit {
   }
 
   async findOne(id: string): Promise<Session> {
-    const session = await this.sessionRepository.findOne({ where: { id } });
+    // Try to find by ID first
+    let session = await this.sessionRepository.findOne({ where: { id } });
+    
+    // If not found by ID, try by name (handles UUID format issues)
     if (!session) {
+      this.logger.warn(`Session not found by ID '${id}', trying by name...`);
+      session = await this.sessionRepository.findOne({ where: { name: id } });
+    }
+    
+    if (!session) {
+      // Log available sessions for debugging
+      const allSessions = await this.sessionRepository.find();
+      this.logger.error(`Session with id '${id}' not found. Available sessions: ${allSessions.map(s => `${s.id}:${s.name}`).join(', ')}`);
       throw new NotFoundException(`Session with id '${id}' not found`);
     }
+    
     return session;
   }
 
