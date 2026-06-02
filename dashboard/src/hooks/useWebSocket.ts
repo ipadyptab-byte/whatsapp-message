@@ -25,7 +25,6 @@ interface WebSocketEvents {
   onMessage?: (event: MessageEvent) => void;
 }
 
-// Use current origin for WebSocket - handle both root and /dashboard paths
 const getSocketUrl = () => {
   const baseUrl = window.location.origin;
   return baseUrl.replace(/\/dashboard$/, '');
@@ -37,10 +36,22 @@ export function useWebSocket(events: WebSocketEvents = {}) {
   const reconnectAttemptsRef = useRef(0);
   const eventsRef = useRef(events);
   
-  // Keep eventsRef updated
   useEffect(() => {
     eventsRef.current = events;
   }, [events]);
+
+  // Send subscribe message for session events
+  const subscribe = useCallback((sessionId: string) => {
+    if (!socketRef.current?.connected) return;
+    
+    console.log('[WebSocket] Subscribing to session:', sessionId);
+    socketRef.current.emit('message', {
+      type: 'subscribe',
+      sessionId,
+      events: ['*'], // Subscribe to all events for this session
+      requestId: `sub-${Date.now()}`,
+    });
+  }, []);
 
   const connect = useCallback(() => {
     if (socketRef.current?.connected) return;
@@ -75,6 +86,15 @@ export function useWebSocket(events: WebSocketEvents = {}) {
       console.log('[WebSocket] Connected successfully');
       setIsConnected(true);
       reconnectAttemptsRef.current = 0;
+      
+      // Get current session ID from URL or default
+      const pathParts = window.location.pathname.split('/');
+      const sessionIdIndex = pathParts.indexOf('sessions');
+      if (sessionIdIndex !== -1 && pathParts[sessionIdIndex + 1]) {
+        const sessionId = pathParts[sessionIdIndex + 1];
+        console.log('[WebSocket] Auto-subscribing to session:', sessionId);
+        setTimeout(() => subscribe(sessionId), 500);
+      }
     });
 
     socketRef.current.on('disconnect', (reason) => {
@@ -128,7 +148,7 @@ export function useWebSocket(events: WebSocketEvents = {}) {
     socketRef.current.on('error', (error) => {
       console.error('[WebSocket] Error:', error);
     });
-  }, []);
+  }, [subscribe]);
 
   useEffect(() => {
     connect();
@@ -141,5 +161,5 @@ export function useWebSocket(events: WebSocketEvents = {}) {
     };
   }, [connect]);
 
-  return { isConnected };
+  return { isConnected, subscribe };
 }
