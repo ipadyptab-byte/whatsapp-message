@@ -27,10 +27,7 @@ interface WebSocketEvents {
 
 // Use current origin for WebSocket - handle both root and /dashboard paths
 const getSocketUrl = () => {
-  // In production, we need to go to root since Socket.IO is at /socket.io
-  // But dashboard is served at /dashboard
   const baseUrl = window.location.origin;
-  // Remove /dashboard from path if present to get base URL
   return baseUrl.replace(/\/dashboard$/, '');
 };
 
@@ -38,11 +35,16 @@ export function useWebSocket(events: WebSocketEvents = {}) {
   const socketRef = useRef<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const reconnectAttemptsRef = useRef(0);
+  const eventsRef = useRef(events);
+  
+  // Keep eventsRef updated
+  useEffect(() => {
+    eventsRef.current = events;
+  }, [events]);
 
   const connect = useCallback(() => {
     if (socketRef.current?.connected) return;
 
-    // Get API key from sessionStorage (same as api.ts)
     const apiKey = sessionStorage.getItem('openwa_api_key');
 
     if (!apiKey) {
@@ -51,13 +53,11 @@ export function useWebSocket(events: WebSocketEvents = {}) {
     }
 
     const socketUrl = getSocketUrl();
-    
-    // Disconnect existing socket if any
+
     if (socketRef.current) {
       socketRef.current.disconnect();
     }
 
-    // Connect to root Socket.IO path (no /events namespace)
     socketRef.current = io(socketUrl, {
       autoConnect: true,
       reconnection: true,
@@ -65,17 +65,10 @@ export function useWebSocket(events: WebSocketEvents = {}) {
       reconnectionDelay: 2000,
       reconnectionDelayMax: 10000,
       timeout: 20000,
-      // Only use polling to avoid WebSocket upgrade issues on Render
       transports: ['polling'],
-      auth: {
-        apiKey,
-      },
-      extraHeaders: {
-        'X-API-Key': apiKey,
-      },
-      query: {
-        apiKey,
-      },
+      auth: { apiKey },
+      extraHeaders: { 'X-API-Key': apiKey },
+      query: { apiKey },
     });
 
     socketRef.current.on('connect', () => {
@@ -92,11 +85,43 @@ export function useWebSocket(events: WebSocketEvents = {}) {
     socketRef.current.on('connect_error', (error) => {
       reconnectAttemptsRef.current++;
       console.warn(`[WebSocket] Connection error (attempt ${reconnectAttemptsRef.current}):`, error.message);
-      
-      // Stop reconnecting after too many attempts
+
       if (reconnectAttemptsRef.current > 10) {
         console.error('[WebSocket] Too many connection attempts, giving up');
         socketRef.current?.disconnect();
+      }
+    });
+
+    // Handle 'message' event wrapper from server {type: 'event', payload: {event, sessionId, data}}
+    socketRef.current.on('message', (msg: any) => {
+      console.log('[WebSocket] Message received:', msg);
+      
+      if (msg && msg.type === 'event' && msg.payload) {
+        const { event, sessionId, data } = msg.payload;
+        console.log('[WebSocket] Event:', event, 'Session:', sessionId, 'Data:', data);
+        
+        if (event === 'session:qr' && eventsRef.current.onQRCode) {
+          eventsRef.current.onQRCode({ sessionId, qrCode: data.qrCode, timestamp: msg.timestamp });
+        } else if (event === 'session:status' && eventsRef.current.onSessionStatus) {
+          eventsRef.current.onSessionStatus({ sessionId, status: data.status, timestamp: msg.timestamp });
+        } else if (event === 'message:received' && eventsRef.current.onMessage) {
+          eventsRef.current.onMessage({ sessionId, message: data, timestamp: msg.timestamp });
+        }
+      }
+    });
+
+    // Also listen for direct events (for simpler cases)
+    socketRef.current.on('session:qr', (data: any) => {
+      console.log('[WebSocket] Direct session:qr:', data);
+      if (eventsRef.current.onQRCode) {
+        eventsRef.current.onQRCode({ sessionId: data.sessionId, qrCode: data.qrCode, timestamp: data.timestamp || new Date().toISOString() });
+      }
+    });
+
+    socketRef.current.on('session:status', (data: any) => {
+      console.log('[WebSocket] Direct session:status:', data);
+      if (eventsRef.current.onSessionStatus) {
+        eventsRef.current.onSessionStatus({ sessionId: data.sessionId, status: data.status, timestamp: data.timestamp || new Date().toISOString() });
       }
     });
 
@@ -115,31 +140,6 @@ export function useWebSocket(events: WebSocketEvents = {}) {
       }
     };
   }, [connect]);
-
-  // Register event handlers
-  useEffect(() => {
-    if (!socketRef.current) return;
-
-    const socket = socketRef.current;
-
-    if (events.onSessionStatus) {
-      socket.on('session:status', events.onSessionStatus);
-    }
-
-    if (events.onQRCode) {
-      socket.on('session:qr', events.onQRCode);
-    }
-
-    if (events.onMessage) {
-      socket.on('session:message', events.onMessage);
-    }
-
-    return () => {
-      socket.off('session:status');
-      socket.off('session:qr');
-      socket.off('session:message');
-    };
-  }, [events.onSessionStatus, events.onQRCode, events.onMessage]);
 
   return { isConnected };
 }
