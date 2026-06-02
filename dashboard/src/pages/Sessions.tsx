@@ -40,6 +40,20 @@ export function Sessions() {
       },
       [toast, t],
     ),
+    onQRCode: useCallback(
+      (event: { sessionId: string; qrCode: string }) => {
+        // Update session status to qr_ready
+        setSessions(prev =>
+          prev.map(s => (s.id === event.sessionId ? { ...s, status: 'qr_ready' as const } : s)),
+        );
+        // Auto-display QR modal when QR is received via WebSocket
+        const session = sessions.find(s => s.id === event.sessionId);
+        if (session && !qrData) {
+          setQrData({ sessionId: event.sessionId, sessionName: session.name, qrCode: event.qrCode });
+        }
+      },
+      [sessions, qrData],
+    ),
   });
 
   const fetchSessions = async () => {
