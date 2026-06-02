@@ -143,11 +143,16 @@ async function bootstrap() {
   const expressApp = app.getHttpAdapter().getInstance();
   expressApp.use((req: any, res: any, next: any) => {
     // Only handle GET requests to non-API paths
-    if (req.method === 'GET' && !req.url.startsWith('/api')) {
+    if (req.method === 'GET' && !req.url.startsWith('/api') && !req.url.startsWith('/socket.io')) {
       // Check if it's a file request (has extension)
       const hasExtension = /\.\w+$/.test(req.url);
       if (!hasExtension && !req.url.startsWith('/dashboard')) {
-        // This is likely a SPA route - redirect to dashboard
+        // This is likely a SPA route - serve the dashboard index.html
+        const indexPath = path.join(dashboardPath, 'index.html');
+        if (fs.existsSync(indexPath)) {
+          return res.sendFile(indexPath);
+        }
+        // Fallback: redirect to dashboard
         return res.redirect('/dashboard' + req.url);
       }
     }
