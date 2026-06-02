@@ -93,12 +93,24 @@ async function bootstrap() {
   const expressApp = app.getHttpAdapter().getInstance();
   const dashboardPath = path.join(process.cwd(), 'dashboard-dist');
 
-  // SPA fallback middleware - must be FIRST to catch routes like /sessions
+  // Dashboard routes that should redirect to /dashboard prefix
+  const dashboardRoutes = ['/sessions', '/contacts', '/messages', '/webhooks', '/hooks', '/api-keys', '/logs', '/infrastructure', '/plugins'];
+
+  // SPA fallback middleware - redirect dashboard routes to /dashboard prefix
   expressApp.use((req: any, res: any, next: any) => {
     if (req.method === 'GET' && 
         !req.url.startsWith('/api') && 
         !req.url.startsWith('/socket.io') &&
         !req.url.startsWith('/dashboard')) {
+
+      // Check if it's a dashboard route - redirect to /dashboard prefix
+      const isDashboardRoute = dashboardRoutes.some(r => req.url === r || req.url.startsWith(r + '/'));
+
+      if (isDashboardRoute) {
+        return res.redirect(`/dashboard${req.url}`);
+      }
+
+      // For other routes, serve dashboard index
       const hasExtension = /\.\w+$/.test(req.url);
       if (!hasExtension) {
         const indexPath = path.join(dashboardPath, 'index.html');
