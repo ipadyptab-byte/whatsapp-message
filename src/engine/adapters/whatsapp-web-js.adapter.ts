@@ -124,35 +124,9 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
         this.logger.warn(`Failed to clean up legacy session files: ${cleanupError}`);
       }
 
-      // Also clean up state file that can cause issues
-      const stateFile = path.join(sessionPath, 'Default', 'SessionStorage');
-      try {
-        if (require('fs').existsSync(stateFile)) {
-          require('fs').rmSync(stateFile, { recursive: true, force: true });
-          this.logger.log('Cleared SessionStorage for fresh start');
-        }
-      } catch (e) {
-        // Ignore errors
-      }
-
-      // Clean up existing auth files to force fresh QR
-      const authDir = path.join(sessionPath, 'Default');
-      const filesToClean = ['DjangoDesktop', 'Local Storage', 'Session Storage', 'cookies.json', 'Cookies', 'IndexedDB'];
-      for (const file of filesToClean) {
-        const filePath = path.join(authDir, file);
-        try {
-          if (require('fs').existsSync(filePath)) {
-            if (require('fs').statSync(filePath).isDirectory()) {
-              require('fs').rmSync(filePath, { recursive: true, force: true });
-            } else {
-              require('fs').unlinkSync(filePath);
-            }
-            this.logger.log(`Cleared: ${file}`);
-          }
-        } catch (e) {
-          // Ignore individual file errors
-        }
-      }
+      // NOTE: Do NOT delete session files here - LocalAuth handles session persistence
+      // and deleting auth files forces fresh QR code every time
+      // Only clean up if explicitly requested (e.g., via reset session endpoint)
 
       this.client = new Client({
         authStrategy: new LocalAuth({
