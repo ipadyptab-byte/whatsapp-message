@@ -232,11 +232,15 @@ export class SessionService implements OnModuleDestroy, OnModuleInit {
     this.engines.set(id, engine);
 
     await engine.initialize({
-      onQRCode: (): void => {
+      onQRCode: (qrCodeUrl: string): void => {
         this.logger.log('QR code generated', {
           sessionId: id,
           action: 'qr_generated',
+          hasQrCode: !!qrCodeUrl,
         });
+
+        // Emit QR to WebSocket clients
+        this.eventsGateway.emitQRCode(id, qrCodeUrl);
 
         // Execute hook for QR event
         void this.hookManager.execute(

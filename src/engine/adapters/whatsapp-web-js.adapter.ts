@@ -83,6 +83,19 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
         '--disable-features=IsolateOrigins,site-per-process',
         '--host-resolver-rules=MAP *:443 127.0.0.1:443,MAP *:80 127.0.0.1:80',
         '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        '--disable-background-timer-throttling',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-breakpad',
+        '--disable-component-extensions-with-background-pages',
+        '--disable-default-apps',
+        '--disable-extensions',
+        '--disable-hang-monitor',
+        '--disable-ipc-flooding-protection',
+        '--disable-renderer-backgrounding',
+        '--enable-features=NetworkService,NetworkServiceInProcess',
+        '--force-color-profile=srgb',
+        '--metrics-recording-only',
+        '--mute-audio',
       ];
 
       // Add proxy configuration if provided
@@ -93,20 +106,83 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
         );
       }
 
+      // Clean up stale session data to avoid authentication issues
+      const sessionPath = path.resolve(this.config.sessionDataPath);
+      const legacySessionFile = path.join(sessionPath, `${this.config.sessionId}.json`);
+      const legacyDevicationFile = path.join(sessionPath, `Devaression-${this.config.sessionId}.json`);
+      
+      try {
+        if (require('fs').existsSync(legacySessionFile)) {
+          this.logger.log(`Removing legacy session file: ${legacySessionFile}`);
+          require('fs').unlinkSync(legacySessionFile);
+        }
+        if (require('fs').existsSync(legacyDevicationFile)) {
+          this.logger.log(`Removing legacy devication file: ${legacyDevicationFile}`);
+          require('fs').unlinkSync(legacyDevicationFile);
+        }
+      } catch (cleanupError) {
+        this.logger.warn(`Failed to clean up legacy session files: ${cleanupError}`);
+      }
+
+      // Also clean up state file that can cause issues
+      const stateFile = path.join(sessionPath, 'Default', 'SessionStorage');
+      try {
+        if (require('fs').existsSync(stateFile)) {
+          require('fs').rmSync(stateFile, { recursive: true, force: true });
+          this.logger.log('Cleared SessionStorage for fresh start');
+        }
+      } catch (e) {
+        // Ignore errors
+      }
+
+      // Clean up existing auth files to force fresh QR
+      const authDir = path.join(sessionPath, 'Default');
+      const filesToClean = ['DjangoDesktop', 'Local Storage', 'Session Storage', 'cookies.json', 'Cookies', 'IndexedDB'];
+      for (const file of filesToClean) {
+        const filePath = path.join(authDir, file);
+        try {
+          if (require('fs').existsSync(filePath)) {
+            if (require('fs').statSync(filePath).isDirectory()) {
+              require('fs').rmSync(filePath, { recursive: true, force: true });
+            } else {
+              require('fs').unlinkSync(filePath);
+            }
+            this.logger.log(`Cleared: ${file}`);
+          }
+        } catch (e) {
+          // Ignore individual file errors
+        }
+      }
+
       this.client = new Client({
         authStrategy: new LocalAuth({
           clientId: this.config.sessionId,
-          dataPath: path.resolve(this.config.sessionDataPath),
+          dataPath: sessionPath,
         }),
         puppeteer: {
           headless: this.config.puppeteer?.headless ?? true,
           args: puppeteerArgs,
+          executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+        },
+        webVersionCache: {
+          type: 'remote',
+          remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/2.2412.54.json',
         },
       });
 
       this.setupEventHandlers();
-      await this.client.initialize();
+
+      // Add initialization timeout
+      const initPromise = this.client.initialize();
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Initialization timeout (60s)')), 60000);
+      });
+
+      await Promise.race([initPromise, timeoutPromise]);
+      
+      this.logger.log(`WhatsApp Web client initialized for session: ${this.config.sessionId}`);
     } catch (error) {
+      this.logger.error(`Failed to initialize WhatsApp client: ${error}`);
       this.setStatus(EngineStatus.FAILED);
       throw error;
     }
