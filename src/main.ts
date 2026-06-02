@@ -78,6 +78,7 @@ async function bootstrap() {
   });
 
   // Enhanced Security Headers (Phase 3 Security Audit)
+  // Note: connectSrc must include '*' or specific origins to allow Socket.IO
   app.use(
     helmet({
       contentSecurityPolicy: {
@@ -86,7 +87,7 @@ async function bootstrap() {
           styleSrc: ["'self'", "'unsafe-inline'"],
           scriptSrc: ["'self'"],
           imgSrc: ["'self'", 'data:', 'https:'],
-          connectSrc: ["'self'"],
+          connectSrc: ["'self'", '*'], // Allow Socket.IO connections
           fontSrc: ["'self'"],
           objectSrc: ["'none'"],
           upgradeInsecureRequests: process.env.NODE_ENV === 'production' ? [] : null,

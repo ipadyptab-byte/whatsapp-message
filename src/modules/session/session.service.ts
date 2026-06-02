@@ -47,9 +47,20 @@ export class SessionService implements OnModuleDestroy, OnModuleInit {
 
   /**
    * On backend startup, reset all active session statuses to disconnected
-   * because the engines are not running yet after restart
+   * This is needed for cold starts (container/pod restarts) where engines
+   * are not running yet. Skip this in development or when engines are already
+   * running to prevent session loss during hot reloads.
    */
   async onModuleInit(): Promise<void> {
+    // Only reset sessions if this is a production/cold start environment
+    // Skip in development or if NODE_ENV is not production
+    const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER;
+    
+    if (!isProduction) {
+      this.logger.log('Development mode - skipping session status reset');
+      return;
+    }
+
     const activeStatuses = [
       SessionStatus.READY,
       SessionStatus.INITIALIZING,
