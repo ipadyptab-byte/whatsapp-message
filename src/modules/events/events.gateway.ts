@@ -26,8 +26,12 @@ import { SUBSCRIBABLE_EVENTS, buildRoomName } from './dto/ws-messages.dto';
 @WebSocketGateway({
   cors: {
     origin: '*', // In production, restrict this
+    credentials: true,
   },
-  namespace: '/events',
+  // No namespace - use root path for Socket.IO
+  namespace: '/',
+  pingTimeout: 60000,
+  pingInterval: 25000,
 })
 export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()

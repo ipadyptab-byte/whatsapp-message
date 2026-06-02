@@ -25,13 +25,19 @@ interface WebSocketEvents {
   onMessage?: (event: MessageEvent) => void;
 }
 
-// Use current origin for WebSocket (goes through nginx proxy in Docker)
-// Falls back to env var or localhost for development
-const SOCKET_URL = import.meta.env.VITE_WS_URL || window.location.origin;
+// Use current origin for WebSocket - handle both root and /dashboard paths
+const getSocketUrl = () => {
+  // In production, we need to go to root since Socket.IO is at /socket.io
+  // But dashboard is served at /dashboard
+  const baseUrl = window.location.origin;
+  // Remove /dashboard from path if present to get base URL
+  return baseUrl.replace(/\/dashboard$/, '');
+};
 
 export function useWebSocket(events: WebSocketEvents = {}) {
   const socketRef = useRef<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const reconnectAttemptsRef = useRef(0);
 
   const connect = useCallback(() => {
     if (socketRef.current?.connected) return;
@@ -44,11 +50,22 @@ export function useWebSocket(events: WebSocketEvents = {}) {
       return;
     }
 
-    socketRef.current = io(`${SOCKET_URL}/events`, {
+    const socketUrl = getSocketUrl();
+    
+    // Disconnect existing socket if any
+    if (socketRef.current) {
+      socketRef.current.disconnect();
+    }
+
+    // Connect to /events namespace (defined in events.gateway.ts)
+    socketRef.current = io(`${socketUrl}/events`, {
       autoConnect: true,
       reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 2000,
+      reconnectionDelayMax: 10000,
+      timeout: 20000,
+      transports: ['polling', 'websocket'], // Try polling first, then websocket
       auth: {
         apiKey,
       },
@@ -61,17 +78,29 @@ export function useWebSocket(events: WebSocketEvents = {}) {
     });
 
     socketRef.current.on('connect', () => {
-      console.log('[WebSocket] Connected');
+      console.log('[WebSocket] Connected successfully');
       setIsConnected(true);
+      reconnectAttemptsRef.current = 0;
     });
 
-    socketRef.current.on('disconnect', () => {
-      console.log('[WebSocket] Disconnected');
+    socketRef.current.on('disconnect', (reason) => {
+      console.log('[WebSocket] Disconnected:', reason);
       setIsConnected(false);
     });
 
-    socketRef.current.on('connect_error', error => {
-      console.warn('[WebSocket] Connection error:', error.message);
+    socketRef.current.on('connect_error', (error) => {
+      reconnectAttemptsRef.current++;
+      console.warn(`[WebSocket] Connection error (attempt ${reconnectAttemptsRef.current}):`, error.message);
+      
+      // Stop reconnecting after too many attempts
+      if (reconnectAttemptsRef.current > 10) {
+        console.error('[WebSocket] Too many connection attempts, giving up');
+        socketRef.current?.disconnect();
+      }
+    });
+
+    socketRef.current.on('error', (error) => {
+      console.error('[WebSocket] Error:', error);
     });
   }, []);
 
