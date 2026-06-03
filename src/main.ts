@@ -87,11 +87,17 @@ async function bootstrap() {
   // Serve static files from dashboard
   app.use('/', express.static(dashboardPath));
 
-  // SPA fallback for React Router (catch all non-API routes)
+  // SPA fallback for React Router (catch ALL non-API routes)
   app.use((req: Request, res: Response, next: NextFunction) => {
-    if (req.path.startsWith('/api') || req.path.startsWith('/assets')) {
+    // Let API routes through to NestJS
+    if (req.path.startsWith('/api/')) {
       return next();
     }
+    // Let static assets through
+    if (req.path.startsWith('/assets/') || req.path.startsWith('/favicon') || req.path.includes('.')) {
+      return next();
+    }
+    // For all other routes, serve React app (index.html)
     const indexPath = path.join(dashboardPath, 'index.html');
     res.sendFile(indexPath, (err: Error) => {
       if (err) {
