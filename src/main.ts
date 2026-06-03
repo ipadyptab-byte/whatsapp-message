@@ -8,6 +8,7 @@ import { ShutdownService } from './common/services/shutdown.service';
 import * as dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as path from 'path';
+import { Request, Response, NextFunction } from 'express';
 
 // Configuration loading order (later sources do NOT override earlier ones):
 //   1. Process env (Docker, shell, systemd) — highest priority
@@ -171,12 +172,12 @@ async function bootstrap() {
   SwaggerModule.setup('api/docs', app, document);
 
   // SPA fallback - serve index.html for non-API routes
-  app.use((req, res, next) => {
+  app.use((req: Request, res: Response, next: NextFunction) => {
     if (req.path.startsWith('/api')) {
       return next();
     }
     const indexPath = path.join(dashboardPath, 'index.html');
-    res.sendFile(indexPath, (err) => {
+    res.sendFile(indexPath, (err: Error) => {
       if (err) {
         // Don't fail on missing dashboard
         console.log('Dashboard not found, serving API only');
