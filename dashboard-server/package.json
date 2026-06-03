@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "build": "cd ../dashboard && npm install && npm run build"
+    "build": "cd ../dashboard && npm install && npm run build && cd ../dashboard-server"
   },
   "dependencies": {
     "express": "^4.18.2",
