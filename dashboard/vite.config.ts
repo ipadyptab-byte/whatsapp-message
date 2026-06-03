@@ -1,30 +1,31 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import { copyFileSync, mkdirSync, existsSync } from 'fs';
-import { resolve } from 'path';
-
-// Copy _redirects for SPA routing fallback after build
-function copyRedirects() {
-  return {
-    name: 'copy-redirects',
-    closeBundle() {
-      const redirectsPath = resolve(__dirname, 'dist', '_redirects');
-      const redirectsContent = '/*    /index.html   200';
-      try {
-        if (!existsSync(resolve(__dirname, 'dist'))) {
-          mkdirSync(resolve(__dirname, 'dist'), { recursive: true });
-        }
-        require('fs').writeFileSync(redirectsPath, redirectsContent);
-      } catch (e) {
-        // Ignore errors
-      }
-    },
-  };
-}
+import { writeFileSync, mkdirSync, existsSync } from 'fs';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), copyRedirects()],
+  plugins: [
+    react(),
+    // Copy _redirects for SPA routing fallback after build
+    {
+      name: 'copy-redirects',
+      closeBundle() {
+        const __dirname = dirname(fileURLToPath(import.meta.url));
+        const redirectsPath = resolve(__dirname, 'dist', '_redirects');
+        const redirectsContent = '/*    /index.html   200';
+        try {
+          if (!existsSync(resolve(__dirname, 'dist'))) {
+            mkdirSync(resolve(__dirname, 'dist'), { recursive: true });
+          }
+          writeFileSync(redirectsPath, redirectsContent);
+        } catch (e) {
+          // Ignore errors
+        }
+      },
+    },
+  ],
   appType: 'spa', // Enable SPA fallback for client-side routing
   define: {
     __APP_VERSION__: JSON.stringify(process.env.APP_VERSION || '0.2.1'),
