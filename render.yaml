@@ -1,6 +1,5 @@
 # Render Blueprint - Auto-deployments for OpenWA
 # https://render.com/docs/blueprint-spec
-
 services:
   # API Backend - Deploy this first
   - type: web
@@ -34,7 +33,6 @@ services:
       name: openwa-data
       mountPath: /data
       sizeGB: 1
-
   # Dashboard Frontend with API Proxy
   - type: web
     name: whatsapp-message-panel
@@ -53,10 +51,3 @@ services:
           envVarKey: RENDER_EXTERNAL_URL
       - key: DASHBOARD_PATH
         value: dashboard/dist
-
-  # PostgreSQL Database (Optional - for production)
-  - type: postgres
-    name: openwa-database
-    plan: starter
-    databaseName: openwa
-    ipAllowList: []
