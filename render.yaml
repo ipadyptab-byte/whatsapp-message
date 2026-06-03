@@ -55,7 +55,7 @@ services:
         value: dashboard/dist
 
   # PostgreSQL Database (Optional - for production)
-  - type: psql
+  - type: postgres
     name: openwa-database
     plan: starter
     databaseName: openwa
