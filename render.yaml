@@ -41,9 +41,8 @@ services:
     env: node
     region: oregon
     plan: starter
-    rootDir: dashboard-server
-    buildCommand: npm install && (cd ../dashboard && npm install && npm run build)
-    startCommand: npm start
+    buildCommand: npm install && npm run dashboard:build
+    startCommand: node dashboard-server/server.js
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
@@ -53,7 +52,7 @@ services:
           name: whatsapp-message-api
           envVarKey: RENDER_EXTERNAL_URL
       - key: DASHBOARD_PATH
-        value: /app/dashboard/dist
+        value: dashboard/dist
 
   # PostgreSQL Database (Optional - for production)
   - type: psql
