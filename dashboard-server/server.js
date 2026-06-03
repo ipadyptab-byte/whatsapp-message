@@ -8,9 +8,13 @@ const PORT = process.env.PORT || 10000;
 // API Backend URL - use environment variable or default
 const API_URL = process.env.API_URL || 'http://localhost:2785';
 
+// Dashboard static files path - use env var or default to ../dashboard/dist relative to server.js
+const DASHBOARD_PATH = process.env.DASHBOARD_PATH || path.join(__dirname, '../dashboard/dist');
+
 console.log('Starting server...');
 console.log('API URL:', API_URL);
-console.log('Serving static files from:', path.join(__dirname, '../dashboard/dist'));
+console.log('Dashboard path:', DASHBOARD_PATH);
+console.log('Serving static files from:', DASHBOARD_PATH);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -18,7 +22,7 @@ app.get('/health', (req, res) => {
 });
 
 // Serve static files from the dashboard build
-app.use(express.static(path.join(__dirname, '../dashboard/dist')));
+app.use(express.static(DASHBOARD_PATH));
 
 // Proxy API requests to backend
 app.use('/api', createProxyMiddleware({
@@ -40,7 +44,7 @@ app.use('/socket.io', createProxyMiddleware({
 
 // SPA fallback - serve index.html for all non-API routes
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../dashboard/dist/index.html'));
+  res.sendFile(path.join(DASHBOARD_PATH, 'index.html'));
 });
 
 app.listen(PORT, () => {
