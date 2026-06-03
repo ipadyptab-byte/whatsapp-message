@@ -1,15 +1,15 @@
 # Render Blueprint - Auto-deployments for OpenWA
 # https://render.com/docs/blueprint-spec
 services:
-  # API Backend - Deploy this first
+  # API Backend + Dashboard (served together)
   - type: web
-    name: whatsapp-message-api
+    name: whatsapp-message-wa
     env: node
     region: oregon
     plan: starter
-    buildCommand: npm ci && npm run build
-    startCommand: node dist/main
-    healthCheckPath: /api/health
+    buildCommand: npm ci --include=dev && npm run build && npm run dashboard:build
+    startCommand: node start-all.js
+    healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: production
@@ -29,26 +29,9 @@ services:
         value: local
       - key: STORAGE_LOCAL_PATH
         value: /data/media
+      - key: DASHBOARD_PATH
+        value: dashboard/dist
     disk:
       name: openwa-data
       mountPath: /data
       sizeGB: 1
-  # Dashboard Frontend with API Proxy
-  - type: web
-    name: whatsapp-message-panel
-    env: node
-    region: oregon
-    plan: starter
-    buildCommand: npm install && npm run dashboard:build
-    startCommand: node dashboard-server/server.js
-    healthCheckPath: /health
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: API_URL
-        fromService:
-          name: whatsapp-message-api
-          envVarKey: RENDER_EXTERNAL_URL
-          type: web
-      - key: DASHBOARD_PATH
-        value: dashboard/dist

@@ -1,4 +1,5 @@
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
@@ -65,7 +66,7 @@ STORAGE_PATH=./data/media
 }
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   // Enable shutdown hooks for graceful shutdown
   app.enableShutdownHooks();
@@ -74,6 +75,13 @@ async function bootstrap() {
   const shutdownService = app.get(ShutdownService);
   shutdownService.setShutdownCallback(async () => {
     await app.close();
+  });
+
+  // Serve static files (dashboard) before other middleware
+  const dashboardPath = process.env.DASHBOARD_PATH || 'dashboard/dist';
+  app.useStaticAssets(dashboardPath, {
+    prefix: '/',
+    index: 'index.html',
   });
 
   // Enhanced Security Headers (Phase 3 Security Audit)
