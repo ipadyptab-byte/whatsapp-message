@@ -8,7 +8,7 @@ services:
     region: oregon
     plan: starter
     buildCommand: npm ci --include=dev && npm run build && npm run dashboard:build
-    startCommand: node start-all.js
+    startCommand: node dist/main
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV

@@ -79,9 +79,12 @@ async function bootstrap() {
 
   // Serve static files (dashboard) before other middleware
   const dashboardPath = process.env.DASHBOARD_PATH || 'dashboard/dist';
+  
+  // Configure static file serving with index fallback
   app.useStaticAssets(dashboardPath, {
     prefix: '/',
-    index: 'index.html',
+    maxAge: '1d',
+    etag: true,
   });
 
   // Enhanced Security Headers (Phase 3 Security Audit)
@@ -166,6 +169,20 @@ async function bootstrap() {
 
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api/docs', app, document);
+
+  // SPA fallback - serve index.html for non-API routes
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/api')) {
+      return next();
+    }
+    const indexPath = path.join(dashboardPath, 'index.html');
+    res.sendFile(indexPath, (err) => {
+      if (err) {
+        // Don't fail on missing dashboard
+        console.log('Dashboard not found, serving API only');
+      }
+    });
+  });
 
   const port = process.env.PORT || 2785;
   await app.listen(port);
