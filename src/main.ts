@@ -9,6 +9,7 @@ import * as dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as path from 'path';
 import { Request, Response, NextFunction } from 'express';
+import * as express from 'express';
 
 // Configuration loading order (later sources do NOT override earlier ones):
 //   1. Process env (Docker, shell, systemd) — highest priority
@@ -78,51 +79,48 @@ async function bootstrap() {
     await app.close();
   });
 
-  // Serve static files (dashboard) before other middleware
-  const dashboardPath = process.env.DASHBOARD_PATH || 'dashboard/dist';
-  
-  // Configure static file serving with index fallback
-  app.useStaticAssets(dashboardPath, {
-    prefix: '/',
-    maxAge: '1d',
-    etag: true,
+  // Serve static files BEFORE global prefix
+  const dashboardPath = path.resolve(process.cwd(), process.env.DASHBOARD_PATH || 'dashboard/dist');
+  console.log('Dashboard path:', dashboardPath);
+  console.log('Dashboard exists:', fs.existsSync(dashboardPath));
+
+  // Serve static files from dashboard
+  app.use('/', express.static(dashboardPath));
+
+  // SPA fallback for React Router (catch all non-API routes)
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/assets')) {
+      return next();
+    }
+    const indexPath = path.join(dashboardPath, 'index.html');
+    res.sendFile(indexPath, (err: Error) => {
+      if (err) {
+        console.log('Dashboard index.html not found at:', indexPath);
+      }
+    });
   });
 
-  // Enhanced Security Headers (Phase 3 Security Audit)
-  app.use(
-    helmet({
-      contentSecurityPolicy: {
-        directives: {
-          defaultSrc: ["'self'"],
-          styleSrc: ["'self'", "'unsafe-inline'"],
-          scriptSrc: ["'self'"],
-          imgSrc: ["'self'", 'data:', 'https:'],
-          connectSrc: ["'self'"],
-          fontSrc: ["'self'"],
-          objectSrc: ["'none'"],
-          upgradeInsecureRequests: process.env.NODE_ENV === 'production' ? [] : null,
-        },
+  // Enhanced Security Headers
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+        imgSrc: ["'self'", "data:", "https:", "blob:"],
+        connectSrc: ["'self'", "ws:", "wss:"],
+        objectSrc: ["'none'"],
       },
-      hsts: {
-        maxAge: 31536000,
-        includeSubDomains: true,
-        preload: true,
-      },
-      noSniff: true,
-      referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
-      // Disable for API usage
-      crossOriginResourcePolicy: { policy: 'cross-origin' },
-    }),
-  );
+    },
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  }));
 
-  // CORS Configuration (Phase 3 Security Audit)
+  // CORS Configuration
   const allowedOrigins = process.env.CORS_ORIGINS?.split(',').map(o => o.trim()) || ['*'];
   app.enableCors({
     origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-      // Allow requests with no origin (mobile apps, Postman, server-to-server)
       if (!origin) return callback(null, true);
-
-      // Check if wildcard or origin matches
       if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
@@ -133,22 +131,22 @@ async function bootstrap() {
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'X-API-Key', 'Authorization', 'X-Request-ID'],
     exposedHeaders: ['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset'],
-    maxAge: 86400, // 24 hours
+    maxAge: 86400,
   });
 
-  // Global prefix
+  // Global prefix for API
   app.setGlobalPrefix('api');
 
-  // Enhanced Validation pipe with security options
+  // Enhanced Validation pipe
   app.useGlobalPipes(
     new ValidationPipe({
-      whitelist: true, // Strip properties not in DTO
-      forbidNonWhitelisted: true, // Throw error on unknown properties
+      whitelist: true,
+      forbidNonWhitelisted: true,
       transform: true,
       transformOptions: {
         enableImplicitConversion: true,
       },
-      disableErrorMessages: process.env.NODE_ENV === 'production', // Hide details in prod
+      disableErrorMessages: process.env.NODE_ENV === 'production',
     }),
   );
 
@@ -163,7 +161,7 @@ async function bootstrap() {
     .addTag('webhooks', 'Webhook configuration')
     .addTag('contacts', 'Contact management')
     .addTag('groups', 'Group management')
-    .addTag('labels', 'Label management (WhatsApp Business)')
+    .addTag('labels', 'Label management')
     .addTag('channels', 'Channel/Newsletter management')
     .addTag('health', 'Health check endpoints')
     .build();
@@ -171,25 +169,12 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api/docs', app, document);
 
-  // SPA fallback - serve index.html for non-API routes
-  app.use((req: Request, res: Response, next: NextFunction) => {
-    if (req.path.startsWith('/api')) {
-      return next();
-    }
-    const indexPath = path.join(dashboardPath, 'index.html');
-    res.sendFile(indexPath, (err: Error) => {
-      if (err) {
-        // Don't fail on missing dashboard
-        console.log('Dashboard not found, serving API only');
-      }
-    });
-  });
-
   const port = process.env.PORT || 2785;
   await app.listen(port);
 
   console.log(`🚀 OpenWA is running on: http://localhost:${port}`);
   console.log(`📚 Swagger docs: http://localhost:${port}/api/docs`);
+  console.log(`🖥️  Dashboard: http://localhost:${port}/`);
 }
 
 void bootstrap();
