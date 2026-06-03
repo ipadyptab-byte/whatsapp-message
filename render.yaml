@@ -37,7 +37,7 @@ services:
 
   # Dashboard Frontend with API Proxy
   - type: web
-    name: whatsapp-message-pannel
+    name: whatsapp-message-panel
     env: node
     region: oregon
     plan: starter
