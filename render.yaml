@@ -49,5 +49,6 @@ services:
         fromService:
           name: whatsapp-message-api
           envVarKey: RENDER_EXTERNAL_URL
+          type: web
       - key: DASHBOARD_PATH
         value: dashboard/dist
