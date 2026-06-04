@@ -1,7 +1,7 @@
 FROM node:20-alpine AS builder
 
 WORKDIR /app
-
+COPY --from=builder /app/dashboard/dist ./dashboard/dist
 # Copy package files
 COPY package*.json ./
 
