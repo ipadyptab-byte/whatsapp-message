@@ -78,7 +78,7 @@ RUN mkdir -p ./data/sessions ./data/media && \
 # USER openwa
 
 # Expose port
-EXPOSE 2785
+EXPOSE 10000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
