@@ -44,6 +44,7 @@ export interface WhatsAppWebJsConfig {
   puppeteer?: {
     headless?: boolean;
     args?: string[];
+    executablePath?: string;
   };
   // Phase 3: Proxy per session
   proxy?: {
@@ -105,6 +106,17 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
         this.logger.warn(`Could not clean up stale singleton locks: ${String(err)}`);
       }
 
+      // Resolve Chromium executable path for ARM / Raspberry Pi or custom installations
+      const chromiumBinary =
+        this.config.puppeteer?.executablePath ||
+        process.env.PUPPETEER_EXECUTABLE_PATH ||
+        (fs.existsSync('/usr/bin/chromium-browser') ? '/usr/bin/chromium-browser' : undefined) ||
+        (fs.existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined);
+
+      if (chromiumBinary) {
+        this.logger.log(`Using Chromium executable: ${chromiumBinary}`);
+      }
+
       this.client = new Client({
         authStrategy: new LocalAuth({
           clientId: this.config.sessionId,
@@ -113,6 +125,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
         puppeteer: {
           headless: this.config.puppeteer?.headless ?? true,
           args: puppeteerArgs,
+          ...(chromiumBinary ? { executablePath: chromiumBinary } : {}),
         },
       });
 
