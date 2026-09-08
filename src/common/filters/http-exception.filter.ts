@@ -43,6 +43,10 @@ export class HttpExceptionFilter implements ExceptionFilter {
       }
     } else if (exception instanceof Error) {
       message = exception.message;
+      if (exception.message.includes('WhatsApp client is not ready') || exception.message.includes('not active')) {
+        status = HttpStatus.SERVICE_UNAVAILABLE;
+        code = 'SERVICE_UNAVAILABLE';
+      }
     }
 
     const errorResponse: ApiResponse = {
@@ -77,6 +81,8 @@ export class HttpExceptionFilter implements ExceptionFilter {
         return 'VALIDATION_ERROR';
       case 429:
         return 'TOO_MANY_REQUESTS';
+      case 503:
+        return 'SERVICE_UNAVAILABLE';
       default:
         return 'INTERNAL_ERROR';
     }

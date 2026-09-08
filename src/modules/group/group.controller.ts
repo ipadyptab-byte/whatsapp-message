@@ -1,6 +1,7 @@
-import { Controller, Get, Post, Put, Delete, Param, Body, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Param, Body, HttpCode, HttpStatus, BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiBody } from '@nestjs/swagger';
 import { SessionService } from '../session/session.service';
+import { EngineStatus } from '../../engine/interfaces/whatsapp-engine.interface';
 
 // DTOs
 class CreateGroupDto {
@@ -30,8 +31,15 @@ export class GroupController {
   @ApiParam({ name: 'sessionId', description: 'Session ID' })
   @ApiResponse({ status: 200, description: 'List of groups' })
   async findAll(@Param('sessionId') sessionId: string) {
-    const engine = this.getEngine(sessionId);
-    return engine.getGroups();
+    const engine = this.sessionService.getEngine(sessionId);
+    if (!engine || engine.getStatus() !== EngineStatus.READY) {
+      return [];
+    }
+    try {
+      return await engine.getGroups();
+    } catch {
+      return [];
+    }
   }
 
   @Get(':groupId')
@@ -205,7 +213,11 @@ export class GroupController {
   private getEngine(sessionId: string) {
     const engine = this.sessionService.getEngine(sessionId);
     if (!engine) {
-      throw new Error('Session is not started');
+      throw new BadRequestException('Session is not started');
+    }
+    const status = engine.getStatus();
+    if (status !== EngineStatus.READY) {
+      throw new ServiceUnavailableException(`WhatsApp client is not ready (current status: ${status})`);
     }
     return engine;
   }

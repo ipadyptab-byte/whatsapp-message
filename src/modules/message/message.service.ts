@@ -1,9 +1,9 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { SessionService } from '../session/session.service';
 import { SendTextMessageDto, SendMediaMessageDto, MessageResponseDto } from './dto';
-import { MediaInput } from '../../engine/interfaces/whatsapp-engine.interface';
+import { MediaInput, EngineStatus } from '../../engine/interfaces/whatsapp-engine.interface';
 import { Message, MessageDirection, MessageStatus } from './entities/message.entity';
 import { HookManager } from '../../core/hooks';
 
@@ -471,6 +471,12 @@ export class MessageService {
     if (!engine) {
       throw new BadRequestException(`Session '${sessionId}' is not active. Start the session first.`);
     }
+    const status = engine.getStatus();
+    if (status !== EngineStatus.READY) {
+      throw new ServiceUnavailableException(
+        `WhatsApp client for session '${sessionId}' is not ready yet (current status: ${status}). Please wait for WhatsApp to finish connecting and try again.`,
+      );
+    }
     return engine;
   }
 
@@ -483,9 +489,14 @@ export class MessageService {
       throw new BadRequestException('mimetype is required when using base64 data');
     }
 
+    let base64Data = dto.base64;
+    if (base64Data && base64Data.includes(';base64,')) {
+      base64Data = base64Data.split(';base64,')[1];
+    }
+
     return {
       mimetype: dto.mimetype || 'application/octet-stream',
-      data: dto.url || dto.base64!,
+      data: dto.url || base64Data!,
       filename: dto.filename,
       caption: dto.caption,
     };

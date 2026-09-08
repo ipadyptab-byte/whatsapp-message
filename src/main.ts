@@ -5,6 +5,7 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { ShutdownService } from './common/services/shutdown.service';
+import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import * as dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -22,10 +23,10 @@ import * as express from 'express';
 const generatedEnvPath = path.resolve(process.cwd(), 'data', '.env.generated');
 const userEnvPath = path.resolve(process.cwd(), '.env');
 
-// Ensure data directory exists
-const dataDir = path.dirname(generatedEnvPath);
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
+// Ensure base local data directory exists
+const defaultDataDir = path.resolve(process.cwd(), 'data');
+if (!fs.existsSync(defaultDataDir)) {
+  fs.mkdirSync(defaultDataDir, { recursive: true });
 }
 
 // 2. User-managed .env (does not override real process env)
@@ -34,10 +35,10 @@ if (fs.existsSync(userEnvPath)) {
   dotenv.config({ path: userEnvPath, override: false });
 }
 
-// 3. Dashboard-saved config (does not override .env or process env)
+// 3. Dashboard-saved config (loads saved infrastructure config)
 if (fs.existsSync(generatedEnvPath)) {
   console.log('[Bootstrap] Loading saved configuration from:', generatedEnvPath);
-  dotenv.config({ path: generatedEnvPath, override: false });
+  dotenv.config({ path: generatedEnvPath, override: true });
 } else {
   console.log('[Bootstrap] First run detected, creating default configuration...');
   // Create minimal .env.generated with sensible defaults
@@ -64,11 +65,90 @@ STORAGE_PATH=./data/media
 `;
   fs.writeFileSync(generatedEnvPath, minimalConfig);
   console.log('[Bootstrap] Created default configuration at:', generatedEnvPath);
-  dotenv.config({ path: generatedEnvPath, override: false });
+  dotenv.config({ path: generatedEnvPath, override: true });
 }
+
+interface SavedDatabaseConfig {
+  type?: string;
+  host?: string;
+  port?: string | number;
+  username?: string;
+  password?: string;
+  database?: string;
+  sslEnabled?: boolean;
+  poolSize?: string | number;
+}
+
+interface SavedInfraConfigFile {
+  database?: SavedDatabaseConfig;
+}
+
+// 4. Load infra-config.json if available
+const infraConfigJsonPath = path.resolve(process.cwd(), 'data', 'infra-config.json');
+if (fs.existsSync(infraConfigJsonPath)) {
+  try {
+    const raw = fs.readFileSync(infraConfigJsonPath, 'utf8');
+    const saved = JSON.parse(raw) as SavedInfraConfigFile;
+    if (saved.database?.type) {
+      process.env.DATABASE_TYPE = saved.database.type;
+      if (saved.database.type === 'postgres') {
+        if (saved.database.host) process.env.DATABASE_HOST = saved.database.host;
+        if (saved.database.port) process.env.DATABASE_PORT = String(saved.database.port);
+        if (saved.database.username) process.env.DATABASE_USERNAME = saved.database.username;
+        if (saved.database.password) process.env.DATABASE_PASSWORD = saved.database.password;
+        if (saved.database.database) process.env.DATABASE_NAME = saved.database.database;
+        if (saved.database.sslEnabled !== undefined) {
+          process.env.DATABASE_SSL = saved.database.sslEnabled ? 'true' : 'false';
+        }
+        if (saved.database.poolSize) {
+          process.env.DATABASE_POOL_SIZE = String(saved.database.poolSize);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[Bootstrap] Could not read infra-config.json:', e);
+  }
+}
+
+// Ensure configured paths exist or safely fallback to ./data if directory is unwritable
+function ensureDirectoryOrFallback(envKey: string, isFile: boolean, defaultRelativePath: string): void {
+  const configured = process.env[envKey] || defaultRelativePath;
+  const targetDir = isFile ? path.dirname(configured) : configured;
+  try {
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+    // Test write permissions
+    const testFile = path.join(targetDir, `.write-test-${Date.now()}`);
+    fs.writeFileSync(testFile, 'ok');
+    fs.unlinkSync(testFile);
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    console.warn(
+      `[Bootstrap] Configured ${envKey}='${configured}' is not writable (${errorMsg}). Falling back to local data directory.`,
+    );
+    const fallbackPath = isFile
+      ? path.join(defaultDataDir, path.basename(configured))
+      : path.join(defaultDataDir, path.basename(configured));
+    if (!isFile && !fs.existsSync(fallbackPath)) {
+      fs.mkdirSync(fallbackPath, { recursive: true });
+    }
+    process.env[envKey] = fallbackPath;
+  }
+}
+
+if (process.env.DATABASE_TYPE !== 'postgres') {
+  ensureDirectoryOrFallback('DATABASE_NAME', true, './data/openwa.sqlite');
+}
+ensureDirectoryOrFallback('SESSION_DATA_PATH', false, './data/sessions');
+ensureDirectoryOrFallback('STORAGE_LOCAL_PATH', false, './data/media');
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  // Increase payload size limit for base64 media and document uploads
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
   // Enable shutdown hooks for graceful shutdown
   app.enableShutdownHooks();
@@ -79,18 +159,40 @@ async function bootstrap() {
     await app.close();
   });
 
+  // Dedicated health check endpoint for Render / Cloud load balancers (returns 200 immediately)
+  app.use('/health', (_req: Request, res: Response) => {
+    res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+  });
+
   // Serve static files BEFORE global prefix
   const dashboardPath = path.resolve(process.cwd(), process.env.DASHBOARD_PATH || 'dashboard/dist');
   console.log('Dashboard path:', dashboardPath);
   console.log('Dashboard exists:', fs.existsSync(dashboardPath));
 
-  // Serve static files from dashboard
-  app.use('/', express.static(dashboardPath));
+  // Serve static files from dashboard with proper caching headers
+  app.use(
+    '/',
+    express.static(dashboardPath, {
+      setHeaders: (res: Response, filePath: string) => {
+        if (filePath.endsWith('index.html')) {
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          res.setHeader('Pragma', 'no-cache');
+          res.setHeader('Expires', '0');
+        } else if (filePath.includes('/assets/')) {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        }
+      },
+    }),
+  );
 
   // SPA fallback for React Router (catch ALL non-API routes)
   app.use((req: Request, res: Response, next: NextFunction) => {
     // Let API routes through to NestJS
-    if (req.path.startsWith('/api/')) {
+    if (req.path === '/api' || req.path.startsWith('/api/')) {
+      return next();
+    }
+    // Let WebSocket and event namespaces through to NestJS
+    if (req.path.startsWith('/socket.io') || req.path.startsWith('/events')) {
       return next();
     }
     // Let static assets through
@@ -99,28 +201,36 @@ async function bootstrap() {
     }
     // For all other routes, serve React app (index.html)
     const indexPath = path.join(dashboardPath, 'index.html');
-    res.sendFile(indexPath, (err: Error) => {
-      if (err) {
-        console.log('Dashboard index.html not found at:', indexPath);
-      }
-    });
+    if (fs.existsSync(indexPath)) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      return res.sendFile(indexPath);
+    }
+    return res
+      .status(200)
+      .send(
+        `<!DOCTYPE html><html><head><title>OpenWA</title></head><body><h2>OpenWA Backend Running</h2><p>Dashboard build not found at ${dashboardPath}. API is available at <a href="/api/docs">/api/docs</a>.</p></body></html>`,
+      );
   });
 
   // Enhanced Security Headers
-  app.use(helmet({
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-        fontSrc: ["'self'", "https://fonts.gstatic.com"],
-        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
-        imgSrc: ["'self'", "data:", "https:", "blob:"],
-        connectSrc: ["'self'", "ws:", "wss:"],
-        objectSrc: ["'none'"],
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+          fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+          scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
+          imgSrc: ["'self'", 'data:', 'https:', 'blob:'],
+          connectSrc: ["'self'", 'ws:', 'wss:'],
+          objectSrc: ["'none'"],
+        },
       },
-    },
-    crossOriginResourcePolicy: { policy: 'cross-origin' },
-  }));
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    }),
+  );
 
   // CORS Configuration
   const allowedOrigins = process.env.CORS_ORIGINS?.split(',').map(o => o.trim()) || ['*'];
@@ -142,6 +252,9 @@ async function bootstrap() {
 
   // Global prefix for API
   app.setGlobalPrefix('api');
+
+  // Global exception filter
+  app.useGlobalFilters(new HttpExceptionFilter());
 
   // Enhanced Validation pipe
   app.useGlobalPipes(
@@ -175,11 +288,11 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api/docs', app, document);
 
- const port = Number(process.env.PORT) || 2785;
+  const port = Number(process.env.PORT) || 2785;
 
-await app.listen(port, '0.0.0.0');
+  await app.listen(port, '0.0.0.0');
 
-console.log(`🚀 OpenWA is running on: http://0.0.0.0:${port}`);
+  console.log(`🚀 OpenWA is running on: http://0.0.0.0:${port}`);
   console.log(`🚀 OpenWA is running on: http://localhost:${port}`);
   console.log(`📚 Swagger docs: http://localhost:${port}/api/docs`);
   console.log(`🖥️  Dashboard: http://localhost:${port}/`);

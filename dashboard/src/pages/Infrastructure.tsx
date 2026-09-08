@@ -8,6 +8,7 @@ import {
   ExternalLink,
   Loader2,
   CheckCircle,
+  AlertCircle,
   Trash2,
   Globe,
   Webhook,
@@ -15,7 +16,7 @@ import {
 } from 'lucide-react';
 import { infraApi } from '../services/api';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
-import { useInfraStatusQuery } from '../hooks/queries';
+import { useInfraStatusQuery, useInfraConfigQuery } from '../hooks/queries';
 import { PageHeader } from '../components/PageHeader';
 import { useToast } from '../components/Toast';
 import './Infrastructure.css';
@@ -87,11 +88,26 @@ export function Infrastructure() {
   const { t } = useTranslation();
   useDocumentTitle(t('infrastructure.title'));
   const toast = useToast();
-  const { data: infraStatus, isLoading: loading } = useInfraStatusQuery();
+  const { data: infraStatus, isLoading: statusLoading } = useInfraStatusQuery();
+  const { data: savedConfig, isLoading: configLoading } = useInfraConfigQuery();
+  const loading = statusLoading || configLoading;
+
   const [saving, setSaving] = useState(false);
   const [showRestartModal, setShowRestartModal] = useState(false);
   const [restartCountdown, setRestartCountdown] = useState(0);
   const [restartStatus, setRestartStatus] = useState<'idle' | 'restarting' | 'waiting' | 'success' | 'error'>('idle');
+
+  const [testingDb, setTestingDb] = useState(false);
+  const [dbTestResult, setDbTestResult] = useState<{
+    success: boolean;
+    message: string;
+    details?: {
+      version?: string;
+      database?: string;
+      apiKeyCount?: number;
+      latencyMs?: number;
+    };
+  } | null>(null);
 
   const [dbConfig, setDbConfig] = useState<DatabaseConfig>({
     type: 'sqlite',
@@ -155,29 +171,96 @@ export function Infrastructure() {
     max: 100,
   });
 
+  // Load saved configuration first
+  useEffect(() => {
+    if (!savedConfig) return;
+
+    if (savedConfig.database) {
+      setDbConfig(prev => ({
+        ...prev,
+        type: savedConfig.database?.type || prev.type,
+        builtIn: savedConfig.database?.builtIn ?? prev.builtIn,
+        host: savedConfig.database?.host || prev.host,
+        port: savedConfig.database?.port || prev.port,
+        username: savedConfig.database?.username || prev.username,
+        password: savedConfig.database?.password !== undefined ? savedConfig.database.password : prev.password,
+        database: savedConfig.database?.database || prev.database,
+        poolSize: savedConfig.database?.poolSize ?? prev.poolSize,
+        sslEnabled: savedConfig.database?.sslEnabled ?? prev.sslEnabled,
+      }));
+    }
+
+    if (savedConfig.redis) {
+      setRedisConfig(prev => ({
+        ...prev,
+        builtIn: savedConfig.redis?.builtIn ?? prev.builtIn,
+        host: savedConfig.redis?.host || prev.host,
+        port: savedConfig.redis?.port || prev.port,
+        password: savedConfig.redis?.password !== undefined ? savedConfig.redis.password : prev.password,
+      }));
+      if (savedConfig.redis.enabled !== undefined) {
+        setRedisEnabled(savedConfig.redis.enabled);
+      }
+    }
+
+    if (savedConfig.queue?.enabled !== undefined) {
+      setQueueEnabled(savedConfig.queue.enabled);
+    }
+
+    if (savedConfig.storage) {
+      setStorageConfig(prev => ({
+        ...prev,
+        type: savedConfig.storage?.type || prev.type,
+        builtIn: savedConfig.storage?.builtIn ?? prev.builtIn,
+        localPath: savedConfig.storage?.localPath || prev.localPath,
+        s3Bucket: savedConfig.storage?.s3Bucket || prev.s3Bucket,
+        s3Region: savedConfig.storage?.s3Region || prev.s3Region,
+        s3AccessKey: savedConfig.storage?.s3AccessKey || prev.s3AccessKey,
+        s3SecretKey: savedConfig.storage?.s3SecretKey || prev.s3SecretKey,
+        s3Endpoint: savedConfig.storage?.s3Endpoint || prev.s3Endpoint,
+      }));
+    }
+
+    if (savedConfig.server) {
+      setServerConfig(prev => ({
+        ...prev,
+        port: savedConfig.server?.port || prev.port,
+        nodeEnv: (savedConfig.server?.nodeEnv as 'production' | 'development') || prev.nodeEnv,
+        domain: savedConfig.server?.domain || prev.domain,
+        dashboardPort: savedConfig.server?.dashboardPort || prev.dashboardPort,
+        baseUrl: savedConfig.server?.baseUrl || prev.baseUrl,
+        dashboardUrl: savedConfig.server?.dashboardUrl || prev.dashboardUrl,
+        corsOrigins: savedConfig.server?.corsOrigins || prev.corsOrigins,
+      }));
+    }
+
+    if (savedConfig.webhook) {
+      setWebhookConfig(prev => ({
+        ...prev,
+        timeout: savedConfig.webhook?.timeout ?? prev.timeout,
+        maxRetries: savedConfig.webhook?.maxRetries ?? prev.maxRetries,
+        retryDelay: savedConfig.webhook?.retryDelay ?? prev.retryDelay,
+      }));
+    }
+
+    if (savedConfig.rateLimit) {
+      setRateLimitConfig(prev => ({
+        ...prev,
+        ttl: savedConfig.rateLimit?.ttl ?? prev.ttl,
+        max: savedConfig.rateLimit?.max ?? prev.max,
+      }));
+    }
+  }, [savedConfig]);
+
+  // Sync real-time live status
   useEffect(() => {
     if (!infraStatus) return;
 
-    setDbConfig(prev => ({
-      ...prev,
-      type: (infraStatus.database.type as 'sqlite' | 'postgres') || 'sqlite',
-      host: infraStatus.database.host || 'localhost',
-    }));
-
     setRedisConfig(prev => ({
       ...prev,
-      host: infraStatus.redis.host,
-      port: String(infraStatus.redis.port),
       connected: infraStatus.redis.connected,
     }));
 
-    setStorageConfig(prev => ({
-      ...prev,
-      type: infraStatus.storage.type,
-      localPath: infraStatus.storage.path || './uploads',
-    }));
-
-    setQueueEnabled(infraStatus.queue.enabled);
     setQueueStats({
       messages: infraStatus.queue.messages,
       webhooks: infraStatus.queue.webhooks,
@@ -207,6 +290,26 @@ export function Infrastructure() {
     setWebhookConfig(prev => ({ ...prev, [key]: value }));
   const updateRateLimitConfig = (key: keyof RateLimitConfig, value: number) =>
     setRateLimitConfig(prev => ({ ...prev, [key]: value }));
+
+  const handleTestDatabase = async () => {
+    setTestingDb(true);
+    setDbTestResult(null);
+    try {
+      const res = await infraApi.testDatabase(dbConfig);
+      setDbTestResult(res);
+      if (res.success) {
+        toast.success(t('infrastructure.database.title'), res.message);
+      } else {
+        toast.error(t('infrastructure.database.title'), res.message);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Database test failed';
+      setDbTestResult({ success: false, message: msg });
+      toast.error(t('infrastructure.database.title'), msg);
+    } finally {
+      setTestingDb(false);
+    }
+  };
 
   const handleSaveConfig = async () => {
     setSaving(true);
@@ -454,9 +557,49 @@ export function Infrastructure() {
               <Database size={20} />
               <h2>{t('infrastructure.database.title')}</h2>
             </div>
-            <span className={`status-indicator ${dbConfig.type === 'postgres' ? 'connected' : 'sqlite'}`}>
-              ● {dbConfig.type === 'postgres' ? 'PostgreSQL' : 'SQLite'}
+            <span className={`status-indicator ${infraStatus?.database?.connected ? 'connected' : 'sqlite'}`}>
+              ● {infraStatus?.database?.connected ? 'Connected' : 'Offline'} ({dbConfig.type === 'postgres' ? 'PostgreSQL' : 'SQLite'})
             </span>
+          </div>
+
+          {/* Database Info & API Keys verification badge strip */}
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '0.625rem',
+              padding: '0.75rem 1rem',
+              background: '#F1F5F9',
+              borderRadius: '8px',
+              margin: '0.75rem 0 1rem',
+              fontSize: '0.8125rem',
+              color: '#334155',
+            }}
+          >
+            <div>
+              <strong style={{ color: '#0F172A' }}>Active DB:</strong>{' '}
+              {infraStatus?.database?.database || (dbConfig.type === 'postgres' ? dbConfig.database : './data/openwa.sqlite')}
+            </div>
+            <span style={{ color: '#94A3B8' }}>•</span>
+            <div>
+              <strong style={{ color: '#0F172A' }}>Host:</strong> {infraStatus?.database?.host || dbConfig.host || 'local'}
+            </div>
+            <span style={{ color: '#94A3B8' }}>•</span>
+            <div>
+              <strong style={{ color: '#0F172A' }}>API Keys in DB:</strong>{' '}
+              <span
+                style={{
+                  fontWeight: 600,
+                  color: (infraStatus?.database?.apiKeyCount ?? 0) > 0 ? '#16A34A' : '#0F172A',
+                }}
+              >
+                {infraStatus?.database?.apiKeyCount ?? 0}
+              </span>
+            </div>
+            <span style={{ color: '#94A3B8' }}>•</span>
+            <div>
+              <strong style={{ color: '#0F172A' }}>Sessions in DB:</strong> {infraStatus?.database?.sessionCount ?? 0}
+            </div>
           </div>
 
           <div className="radio-group">
@@ -569,6 +712,81 @@ export function Infrastructure() {
               )}
             </>
           )}
+
+          {/* Test Database Connection Section */}
+          <div
+            style={{
+              marginTop: '1rem',
+              padding: '1rem',
+              background: '#F8FAFC',
+              borderRadius: '8px',
+              border: '1px solid #E2E8F0',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.75rem',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div>
+                <strong style={{ fontSize: '0.875rem', color: '#1E293B' }}>Test Database Connection</strong>
+                <p style={{ margin: 0, fontSize: '0.75rem', color: '#64748B' }}>
+                  Verify database credentials, latency, and confirm API keys storage before applying.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={testingDb}
+                onClick={handleTestDatabase}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  padding: '0.5rem 1rem',
+                  cursor: testingDb ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {testingDb ? <Loader2 className="animate-spin" size={16} /> : <Database size={16} />}
+                {testingDb ? 'Testing Connection...' : 'Test Connection'}
+              </button>
+            </div>
+
+            {dbTestResult && (
+              <div
+                style={{
+                  padding: '0.75rem 1rem',
+                  borderRadius: '6px',
+                  background: dbTestResult.success ? '#ECFDF5' : '#FEF2F2',
+                  border: `1px solid ${dbTestResult.success ? '#A7F3D0' : '#FECACA'}`,
+                  color: dbTestResult.success ? '#065F46' : '#991B1B',
+                  fontSize: '0.8125rem',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '0.5rem',
+                }}
+              >
+                {dbTestResult.success ? (
+                  <CheckCircle size={18} style={{ color: '#059669', flexShrink: 0, marginTop: '2px' }} />
+                ) : (
+                  <AlertCircle size={18} style={{ color: '#DC2626', flexShrink: 0, marginTop: '2px' }} />
+                )}
+                <div>
+                  <div style={{ fontWeight: 600 }}>{dbTestResult.message}</div>
+                  {dbTestResult.details && (
+                    <div style={{ marginTop: '0.25rem', fontSize: '0.75rem', opacity: 0.9 }}>
+                      {dbTestResult.details.latencyMs !== undefined && (
+                        <span>Latency: {dbTestResult.details.latencyMs}ms </span>
+                      )}
+                      {dbTestResult.details.version && <span>• Engine: {dbTestResult.details.version} </span>}
+                      {dbTestResult.details.apiKeyCount !== undefined && (
+                        <span>• API Keys in DB: {dbTestResult.details.apiKeyCount}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
 
           <div
             className="empty-state-card"

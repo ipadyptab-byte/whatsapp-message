@@ -1,4 +1,4 @@
-import { useState, useEffect, lazy, Suspense } from 'react';
+import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
@@ -8,15 +8,16 @@ import { RoleProvider, useRole, type UserRole } from './hooks/useRole';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import './App.css';
 
-const Login = lazy(() => import('./pages/Login').then(m => ({ default: m.Login })));
-const Dashboard = lazy(() => import('./pages/Dashboard').then(m => ({ default: m.Dashboard })));
-const Sessions = lazy(() => import('./pages/Sessions').then(m => ({ default: m.Sessions })));
-const Webhooks = lazy(() => import('./pages/Webhooks').then(m => ({ default: m.Webhooks })));
-const Logs = lazy(() => import('./pages/Logs').then(m => ({ default: m.Logs })));
-const ApiKeys = lazy(() => import('./pages/ApiKeys').then(m => ({ default: m.ApiKeys })));
-const MessageTester = lazy(() => import('./pages/MessageTester').then(m => ({ default: m.MessageTester })));
-const Infrastructure = lazy(() => import('./pages/Infrastructure').then(m => ({ default: m.Infrastructure })));
-const Plugins = lazy(() => import('./pages/Plugins'));
+import { Login } from './pages/Login';
+import { Dashboard } from './pages/Dashboard';
+import { Sessions } from './pages/Sessions';
+import { Webhooks } from './pages/Webhooks';
+import { Logs } from './pages/Logs';
+import { ApiKeys } from './pages/ApiKeys';
+import { MessageTester } from './pages/MessageTester';
+import { Marketing } from './pages/Marketing';
+import { Infrastructure } from './pages/Infrastructure';
+import Plugins from './pages/Plugins';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -29,59 +30,122 @@ const queryClient = new QueryClient({
 });
 
 function AppContent() {
-  // Initialize from sessionStorage to avoid setState in effect
-  const savedKey = sessionStorage.getItem('openwa_api_key');
-  const [isAuthenticated, setIsAuthenticated] = useState(!!savedKey);
-  const [, setApiKey] = useState(savedKey || '');
+  const [, setApiKey] = useState<string>(() => {
+    return localStorage.getItem('openwa_api_key') || sessionStorage.getItem('openwa_api_key') || '';
+  });
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    if (sessionStorage.getItem('openwa_manual_logout') === 'true') {
+      return false;
+    }
+    return !!(localStorage.getItem('openwa_api_key') || sessionStorage.getItem('openwa_api_key'));
+  });
+  const [isCheckingAuth, setIsCheckingAuth] = useState<boolean>(true);
   const { setRole, role } = useRole();
 
-  const handleLogin = async (key: string) => {
+  const handleLogin = (key: string, userRole?: UserRole) => {
     setApiKey(key);
+    sessionStorage.removeItem('openwa_manual_logout');
+    localStorage.setItem('openwa_api_key', key);
     sessionStorage.setItem('openwa_api_key', key);
 
-    // Fetch the role from API
-    try {
-      const response = await fetch('/api/auth/validate', {
-        method: 'POST',
-        headers: { 'X-API-Key': key },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setRole(data.role as UserRole);
-      }
-    } catch {
-      // Default to viewer if we can't fetch role
-      setRole('viewer');
+    if (userRole) {
+      setRole(userRole);
+      setIsAuthenticated(true);
+      return;
     }
 
-    setIsAuthenticated(true);
+    // Fetch the role from API if not provided
+    fetch('/api/auth/validate', {
+      method: 'POST',
+      headers: { 'X-API-Key': key },
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.valid && data.role) {
+          setRole(data.role as UserRole);
+        } else {
+          setRole('admin');
+        }
+      })
+      .catch(() => {
+        setRole('admin');
+      })
+      .finally(() => {
+        setIsAuthenticated(true);
+      });
   };
 
   const handleLogout = () => {
     setApiKey('');
     setIsAuthenticated(false);
     setRole(null);
+    sessionStorage.setItem('openwa_manual_logout', 'true');
+    localStorage.removeItem('openwa_api_key');
     sessionStorage.removeItem('openwa_api_key');
   };
 
-  // Re-validate and get role on mount if already authenticated
+  // Automatically validate existing key or auto-authenticate with persistent admin key
   useEffect(() => {
-    if (!savedKey) return;
+    let isMounted = true;
 
-    fetch('/api/auth/validate', {
-      method: 'POST',
-      headers: { 'X-API-Key': savedKey },
-    })
-      .then(res => res.json())
-      .then(data => {
-        if (data.valid && data.role) {
-          setRole(data.role as UserRole);
+    async function initializeAuth() {
+      // If user explicitly logged out in this browser session, respect their choice
+      if (sessionStorage.getItem('openwa_manual_logout') === 'true') {
+        if (isMounted) setIsCheckingAuth(false);
+        return;
+      }
+
+      const storedKey = localStorage.getItem('openwa_api_key') || sessionStorage.getItem('openwa_api_key');
+
+      if (storedKey) {
+        try {
+          const res = await fetch('/api/auth/validate', {
+            method: 'POST',
+            headers: { 'X-API-Key': storedKey },
+          });
+          const data = await res.json();
+          if (data.valid && isMounted) {
+            setRole((data.role as UserRole) || 'admin');
+            setIsAuthenticated(true);
+            setApiKey(storedKey);
+            setIsCheckingAuth(false);
+            return;
+          }
+        } catch {
+          // If server is unreachable or temporary network glitch, continue to current-key fallback
         }
-      })
-      .catch(() => {
-        // Keep existing role from localStorage if validation fails
-      });
-  }, [savedKey, setRole]);
+      }
+
+      // If no stored key or previous key invalid, seamlessly auto-connect to persistent admin key
+      try {
+        const keyRes = await fetch('/api/auth/current-key');
+        if (keyRes.ok) {
+          const keyData = await keyRes.json();
+          if (keyData.apiKey && isMounted) {
+            setApiKey(keyData.apiKey);
+            localStorage.setItem('openwa_api_key', keyData.apiKey);
+            sessionStorage.setItem('openwa_api_key', keyData.apiKey);
+            setRole((keyData.role as UserRole) || 'admin');
+            setIsAuthenticated(true);
+            setIsCheckingAuth(false);
+            return;
+          }
+        }
+      } catch {
+        // Fallback to manual login screen
+      }
+
+      if (isMounted) {
+        setIsCheckingAuth(false);
+      }
+    }
+
+    initializeAuth();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [setRole]);
 
   const loadingFallback = (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
@@ -89,14 +153,17 @@ function AppContent() {
     </div>
   );
 
+  if (isCheckingAuth) {
+    return loadingFallback;
+  }
+
   if (!isAuthenticated) {
-    return <Suspense fallback={loadingFallback}><Login onLogin={handleLogin} /></Suspense>;
+    return <Login onLogin={handleLogin} />;
   }
 
   return (
     <ToastProvider>
       <BrowserRouter>
-        <Suspense fallback={loadingFallback}>
         <Routes>
           <Route path="/" element={<Layout onLogout={handleLogout} userRole={role} />}>
             <Route index element={<Dashboard />} />
@@ -105,12 +172,12 @@ function AppContent() {
             {role === 'admin' && <Route path="api-keys" element={<ApiKeys />} />}
             <Route path="logs" element={<Logs />} />
             <Route path="message-tester" element={<MessageTester />} />
+            <Route path="marketing" element={<Marketing />} />
             <Route path="infrastructure" element={<Infrastructure />} />
             {role === 'admin' && <Route path="plugins" element={<Plugins />} />}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
-        </Suspense>
       </BrowserRouter>
     </ToastProvider>
   );

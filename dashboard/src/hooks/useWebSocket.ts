@@ -36,8 +36,8 @@ export function useWebSocket(events: WebSocketEvents = {}) {
   const connect = useCallback(() => {
     if (socketRef.current?.connected) return;
 
-    // Get API key from sessionStorage (same as api.ts)
-    const apiKey = sessionStorage.getItem('openwa_api_key');
+    // Get API key from localStorage or sessionStorage (same as api.ts)
+    const apiKey = localStorage.getItem('openwa_api_key') || sessionStorage.getItem('openwa_api_key');
 
     if (!apiKey) {
       console.warn('[WebSocket] No API key found, skipping connection');
@@ -63,6 +63,12 @@ export function useWebSocket(events: WebSocketEvents = {}) {
     socketRef.current.on('connect', () => {
       console.log('[WebSocket] Connected');
       setIsConnected(true);
+      // Subscribe to all session events
+      socketRef.current?.emit('message', {
+        type: 'subscribe',
+        sessionId: '*',
+        events: ['*'],
+      });
     });
 
     socketRef.current.on('disconnect', () => {
@@ -92,6 +98,7 @@ export function useWebSocket(events: WebSocketEvents = {}) {
 
     const socket = socketRef.current;
 
+    // Handle direct event channels
     if (events.onSessionStatus) {
       socket.on('session:status', events.onSessionStatus);
     }
@@ -104,10 +111,44 @@ export function useWebSocket(events: WebSocketEvents = {}) {
       socket.on('session:message', events.onMessage);
     }
 
+    // Handle room-based message events
+    const handleGenericMessage = (msg: {
+      type?: string;
+      payload?: { event?: string; sessionId?: string; data?: Record<string, unknown> };
+      timestamp?: string;
+    }) => {
+      if (msg?.type !== 'event' || !msg.payload) return;
+      const { event, sessionId, data } = msg.payload;
+      const timestamp = msg.timestamp || new Date().toISOString();
+
+      if (event === 'session.status' && events.onSessionStatus) {
+        events.onSessionStatus({
+          sessionId: sessionId || '',
+          status: (data?.status as string) || '',
+          timestamp,
+        });
+      } else if (event === 'session.qr' && events.onQRCode) {
+        events.onQRCode({
+          sessionId: sessionId || '',
+          qrCode: (data?.qrCode as string) || '',
+          timestamp,
+        });
+      } else if (event === 'message.received' && events.onMessage) {
+        events.onMessage({
+          sessionId: sessionId || '',
+          message: data || {},
+          timestamp,
+        });
+      }
+    };
+
+    socket.on('message', handleGenericMessage);
+
     return () => {
       socket.off('session:status');
       socket.off('session:qr');
       socket.off('session:message');
+      socket.off('message', handleGenericMessage);
     };
   }, [events.onSessionStatus, events.onQRCode, events.onMessage]);
 

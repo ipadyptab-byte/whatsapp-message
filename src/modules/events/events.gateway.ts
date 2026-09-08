@@ -206,6 +206,8 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
    */
   emitSessionStatus(sessionId: string, status: string, data?: Record<string, unknown>) {
     this.emitToRooms(sessionId, 'session.status', { status, ...data });
+    // Direct event for dashboard UI listeners
+    this.server.emit('session:status', { sessionId, status, ...data, timestamp: new Date().toISOString() });
   }
 
   /**
@@ -213,6 +215,8 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
    */
   emitQRCode(sessionId: string, qrCode: string) {
     this.emitToRooms(sessionId, 'session.qr', { qrCode });
+    // Direct event for dashboard UI listeners
+    this.server.emit('session:qr', { sessionId, qrCode, timestamp: new Date().toISOString() });
   }
 
   /**
@@ -220,6 +224,7 @@ export class EventsGateway implements OnGatewayInit, OnGatewayConnection, OnGate
    */
   emitMessage(sessionId: string, message: Record<string, unknown>) {
     this.emitToRooms(sessionId, 'message.received', message);
+    this.server.emit('session:message', { sessionId, message, timestamp: new Date().toISOString() });
   }
 
   /**

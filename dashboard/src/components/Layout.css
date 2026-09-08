@@ -114,6 +114,8 @@
   flex-direction: column;
   gap: 0.25rem;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
 }
 
 .sidebar.collapsed .sidebar-nav {

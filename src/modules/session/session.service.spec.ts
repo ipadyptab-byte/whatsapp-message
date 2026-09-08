@@ -367,14 +367,24 @@ describe('SessionService', () => {
   // ── onModuleInit ──────────────────────────────────────────────────
 
   describe('onModuleInit', () => {
-    it('should reset active sessions to DISCONNECTED on startup', async () => {
-      (repository.update as jest.Mock).mockResolvedValue({ affected: 3 });
+    it('should preserve connected sessions and auto-restore engines on startup', async () => {
+      const readySession = createMockSession({
+        id: 'ready-1',
+        name: 'connected-session',
+        status: SessionStatus.READY,
+        phone: '1234567890',
+        connectedAt: new Date(),
+      });
+      (repository.find as jest.Mock).mockResolvedValue([readySession]);
+      (repository.findOne as jest.Mock).mockResolvedValue(readySession);
+      (repository.update as jest.Mock).mockResolvedValue({ affected: 1 });
 
       await service.onModuleInit();
 
-      expect(repository.update).toHaveBeenCalledWith(expect.objectContaining({ status: expect.anything() as string }), {
-        status: SessionStatus.DISCONNECTED,
-      });
+      expect(repository.update).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ status: SessionStatus.DISCONNECTED }),
+      );
     });
   });
 

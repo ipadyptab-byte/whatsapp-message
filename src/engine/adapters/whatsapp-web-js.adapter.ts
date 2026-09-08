@@ -2,6 +2,8 @@ import { EventEmitter } from 'events';
 import { Client, LocalAuth, MessageMedia } from 'whatsapp-web.js';
 import * as qrcode from 'qrcode';
 import * as path from 'path';
+import * as fs from 'fs';
+import { ServiceUnavailableException } from '@nestjs/common';
 import {
   IWhatsAppEngine,
   EngineStatus,
@@ -88,6 +90,21 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
         );
       }
 
+      // Clean up any stale singleton lock files from previous unexpected exits
+      const sessionDir = path.resolve(this.config.sessionDataPath, `session-${this.config.sessionId}`);
+      try {
+        const lockFiles = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
+        for (const file of lockFiles) {
+          const filePath = path.join(sessionDir, file);
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+            this.logger.log(`Cleaned up stale lock file: ${filePath}`);
+          }
+        }
+      } catch (err) {
+        this.logger.warn(`Could not clean up stale singleton locks: ${String(err)}`);
+      }
+
       this.client = new Client({
         authStrategy: new LocalAuth({
           clientId: this.config.sessionId,
@@ -110,6 +127,14 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
   private setupEventHandlers(): void {
     if (!this.client) return;
 
+    this.client.on('loading_screen', (percent: number, message: string) => {
+      this.logger.log(`WhatsApp loading: ${percent}% - ${message}`);
+    });
+
+    this.client.on('change_state', (state: string) => {
+      this.logger.log(`WhatsApp state changed: ${state}`);
+    });
+
     // eslint-disable-next-line @typescript-eslint/no-misused-promises
     this.client.on('qr', async (qr: string) => {
       try {
@@ -122,11 +147,13 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     });
 
     this.client.on('authenticated', () => {
+      this.logger.log(`WhatsApp authenticated for session ${this.config.sessionId}`);
       this.setStatus(EngineStatus.AUTHENTICATING);
       this.qrCode = null;
     });
 
     this.client.on('ready', () => {
+      this.logger.log(`WhatsApp client ready for session ${this.config.sessionId}`);
       try {
         const info = this.client?.info;
         this.phoneNumber = info?.wid?.user || null;
@@ -144,22 +171,29 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     this.client.on('message', async msg => {
       try {
         const incomingMessage: IncomingMessage = {
-          id: msg.id._serialized,
+          id: msg?.id?._serialized,
           from: msg.from,
           to: msg.to,
           chatId: msg.from,
           body: msg.body,
           type: msg.type,
-          timestamp: msg.timestamp,
+          timestamp: msg?.timestamp,
           fromMe: msg.fromMe,
           isGroup: msg.from.endsWith('@g.us'),
         };
 
-        // Handle media
-        if (msg.hasMedia) {
+        // Handle media safely
+        const downloadableMediaTypes = new Set(['image', 'video', 'audio', 'ptt', 'document', 'sticker']);
+        if (msg.hasMedia && downloadableMediaTypes.has(msg.type)) {
           try {
-            const media = await msg.downloadMedia();
-            if (media) {
+            // Guard downloadMedia with timeout (6s) to prevent hanging on expired or non-cached media
+            const downloadPromise = msg.downloadMedia();
+            const timeoutPromise = new Promise<null>((_, reject) =>
+              setTimeout(() => reject(new Error('Media download timed out')), 6000),
+            );
+            const media = await Promise.race([downloadPromise, timeoutPromise]);
+
+            if (media && media.data) {
               incomingMessage.media = {
                 mimetype: media.mimetype,
                 filename: media.filename || undefined,
@@ -167,20 +201,45 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
               };
             }
           } catch (error) {
-            this.logger.error('Error downloading media', String(error));
+            // Expired media, revoked media, or WhatsApp Web internal decrypter misses are expected
+            const errorMsg =
+              error instanceof Error
+                ? error.message
+                : typeof error === 'object'
+                  ? JSON.stringify(error)
+                  : String(error);
+            this.logger.warn(
+              `Media download skipped for message ${msg.id?._serialized || 'unknown'} (${msg.type}): ${errorMsg}`,
+            );
           }
         }
 
         // Handle quoted message
         if (msg.hasQuotedMsg) {
           try {
-            const quoted = await msg.getQuotedMessage();
-            incomingMessage.quotedMessage = {
-              id: quoted.id._serialized,
-              body: quoted.body,
-            };
+            const quotedPromise = msg.getQuotedMessage();
+            const timeoutPromise = new Promise<null>((_, reject) =>
+              setTimeout(() => reject(new Error('Quoted message retrieval timed out')), 3000),
+            );
+            const quoted = (await Promise.race([quotedPromise, timeoutPromise])) as {
+              id?: { _serialized?: string };
+              body?: string;
+            } | null;
+
+            if (quoted && quoted.id?._serialized) {
+              incomingMessage.quotedMessage = {
+                id: quoted.id._serialized,
+                body: quoted.body || '',
+              };
+            }
           } catch (error) {
-            this.logger.error('Error getting quoted message', String(error));
+            const errorMsg =
+              error instanceof Error
+                ? error.message
+                : typeof error === 'object'
+                  ? JSON.stringify(error)
+                  : String(error);
+            this.logger.warn(`Could not retrieve quoted message for ${msg.id?._serialized || 'unknown'}: ${errorMsg}`);
           }
         }
 
@@ -191,7 +250,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     });
 
     this.client.on('message_ack', (msg, ack) => {
-      this.callbacks.onMessageAck?.(msg.id._serialized, ack);
+      this.callbacks.onMessageAck?.(msg?.id?._serialized, ack);
     });
 
     this.client.on('disconnected', reason => {
@@ -273,8 +332,8 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     this.ensureReady();
     const msg = await this.client!.sendMessage(chatId, text);
     return {
-      id: msg.id._serialized,
-      timestamp: msg.timestamp,
+      id: msg?.id?._serialized,
+      timestamp: msg?.timestamp,
     };
   }
 
@@ -317,8 +376,8 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     });
 
     return {
-      id: msg.id._serialized,
-      timestamp: msg.timestamp,
+      id: msg?.id?._serialized,
+      timestamp: msg?.timestamp,
     };
   }
 
@@ -327,7 +386,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     const contacts = await this.client!.getContacts();
 
     return contacts.map(c => ({
-      id: c.id._serialized,
+      id: c?.id?._serialized,
       name: c.name || undefined,
       pushName: c.pushname || undefined,
       number: c.number,
@@ -341,7 +400,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     try {
       const contact = await this.client!.getContactById(contactId);
       return {
-        id: contact.id._serialized,
+        id: contact?.id?._serialized,
         name: contact.name || undefined,
         pushName: contact.pushname || undefined,
         number: contact.number,
@@ -370,11 +429,11 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     return groups.map(g => {
       const groupChat = g as unknown as GroupChat;
       return {
-        id: g.id._serialized,
+        id: g?.id?._serialized || '',
         name: g.name,
         participantsCount: groupChat.participants?.length,
         isAdmin: groupChat.participants?.some(
-          p => p.isAdmin && p.id._serialized === this.client?.info?.wid?._serialized,
+          p => p?.isAdmin && p?.id?._serialized === this.client?.info?.wid?._serialized,
         ),
       };
     });
@@ -392,8 +451,8 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     });
     const msg = await this.client!.sendMessage(chatId, loc);
     return {
-      id: msg.id._serialized,
-      timestamp: msg.timestamp,
+      id: msg?.id?._serialized,
+      timestamp: msg?.timestamp,
     };
   }
 
@@ -412,8 +471,8 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       parseVCards: true,
     });
     return {
-      id: msg.id._serialized,
-      timestamp: msg.timestamp,
+      id: msg?.id?._serialized,
+      timestamp: msg?.timestamp,
     };
   }
 
@@ -435,8 +494,8 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       sendMediaAsSticker: true,
     });
     return {
-      id: msg.id._serialized,
-      timestamp: msg.timestamp,
+      id: msg?.id?._serialized,
+      timestamp: msg?.timestamp,
     };
   }
 
@@ -445,7 +504,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     // Find the message to quote
     const chat = await this.client!.getChatById(chatId);
     const messages = await chat.fetchMessages({ limit: 100 });
-    const quotedMsg = messages.find(m => m.id._serialized === quotedMsgId);
+    const quotedMsg = messages.find(m => m?.id?._serialized === quotedMsgId);
 
     if (!quotedMsg) {
       throw new Error(`Message ${quotedMsgId} not found`);
@@ -453,8 +512,8 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
 
     const msg = await quotedMsg.reply(text);
     return {
-      id: msg.id._serialized,
-      timestamp: msg.timestamp,
+      id: msg?.id?._serialized,
+      timestamp: msg?.timestamp,
     };
   }
 
@@ -462,7 +521,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     this.ensureReady();
     const chat = await this.client!.getChatById(fromChatId);
     const messages = await chat.fetchMessages({ limit: 100 });
-    const msgToForward = messages.find(m => m.id._serialized === messageId);
+    const msgToForward = messages.find(m => m?.id?._serialized === messageId);
 
     if (!msgToForward) {
       throw new Error(`Message ${messageId} not found`);
@@ -487,15 +546,15 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       }
       const groupChat = chat as unknown as GroupChat;
       const participants: GroupParticipant[] = (groupChat.participants || []).map(p => ({
-        id: String(p.id._serialized),
-        number: String(p.id.user),
-        name: p.name ? String(p.name) : undefined,
-        isAdmin: Boolean(p.isAdmin),
-        isSuperAdmin: Boolean(p.isSuperAdmin),
+        id: String(p?.id?._serialized || ''),
+        number: String(p?.id?.user || ''),
+        name: p?.name ? String(p.name) : undefined,
+        isAdmin: Boolean(p?.isAdmin),
+        isSuperAdmin: Boolean(p?.isSuperAdmin),
       }));
 
       return {
-        id: chat.id._serialized,
+        id: chat?.id?._serialized || '',
         name: chat.name,
         description: groupChat.description ? String(groupChat.description) : undefined,
         owner: groupChat.owner?._serialized ? String(groupChat.owner._serialized) : undefined,
@@ -596,7 +655,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     this.ensureReady();
     const chat = await this.client!.getChatById(chatId);
     const messages = await chat.fetchMessages({ limit: 100 });
-    const message = messages.find(m => m.id._serialized === messageId);
+    const message = messages.find(m => m?.id?._serialized === messageId);
     if (!message) {
       throw new Error(`Message ${messageId} not found in chat ${chatId}`);
     }
@@ -608,7 +667,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     this.ensureReady();
     const chat = await this.client!.getChatById(chatId);
     const messages = await chat.fetchMessages({ limit: 100 });
-    const message = messages.find(m => m.id._serialized === messageId);
+    const message = messages.find(m => m?.id?._serialized === messageId);
     if (!message) {
       throw new Error(`Message ${messageId} not found in chat ${chatId}`);
     }
@@ -629,7 +688,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
         senders: (r.senders || []).map(s => ({
           senderId: String(s.senderId),
           emoji: String(s.reaction),
-          timestamp: Number(s.timestamp),
+          timestamp: Number(s?.timestamp),
         })),
       });
     }
@@ -701,7 +760,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       return [];
     }
     return channels.map((ch: WwjsChannelData) => ({
-      id: String(typeof ch.id === 'object' ? ch.id._serialized : ch.id),
+      id: String(typeof ch.id === 'object' ? ch?.id?._serialized : ch.id),
       name: String(ch.name || ''),
       description: ch.description ? String(ch.description) : undefined,
       inviteCode: ch.inviteCode ? String(ch.inviteCode) : undefined,
@@ -718,7 +777,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
         return null;
       }
       return {
-        id: String(typeof ch.id === 'object' ? ch.id._serialized : ch.id),
+        id: String(typeof ch.id === 'object' ? ch?.id?._serialized : ch.id),
         name: String(ch.name || ''),
         description: ch.description ? String(ch.description) : undefined,
         inviteCode: ch.inviteCode ? String(ch.inviteCode) : undefined,
@@ -736,7 +795,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     const ch = await (this.client as unknown as BusinessClient).subscribeToChannel(inviteCode);
     this.logger.log(`Subscribed to channel with invite code: ${inviteCode}`);
     return {
-      id: String(typeof ch.id === 'object' ? ch.id._serialized : ch.id),
+      id: String(typeof ch.id === 'object' ? ch?.id?._serialized : ch.id),
       name: String(ch.name || ''),
       description: ch.description ? String(ch.description) : undefined,
     };
@@ -760,9 +819,9 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
         return [];
       }
       return messages.map(msg => ({
-        id: String(typeof msg.id === 'object' ? msg.id._serialized : msg.id),
+        id: String(typeof msg.id === 'object' ? msg?.id?._serialized : msg.id),
         body: String(msg.body || ''),
-        timestamp: Number(msg.timestamp),
+        timestamp: Number(msg?.timestamp),
         hasMedia: Boolean(msg.hasMedia),
         mediaUrl: msg.mediaUrl ? String(msg.mediaUrl) : undefined,
       }));
@@ -779,7 +838,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
     this.ensureReady();
     const chat = await this.client!.getChatById(chatId);
     const messages = await chat.fetchMessages({ limit: 100 });
-    const message = messages.find(m => m.id._serialized === messageId || m.id.id === messageId);
+    const message = messages.find(m => m?.id?._serialized === messageId || m?.id?.id === messageId);
     if (!message) {
       throw new Error(`Message ${messageId} not found in chat ${chatId}`);
     }
@@ -917,7 +976,7 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
 
   private ensureReady(): void {
     if (this.status !== EngineStatus.READY || !this.client) {
-      throw new Error('WhatsApp client is not ready');
+      throw new ServiceUnavailableException(`WhatsApp client is not ready (current status: ${this.status})`);
     }
   }
 }

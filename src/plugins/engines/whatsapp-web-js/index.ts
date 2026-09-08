@@ -37,10 +37,11 @@ export class WhatsAppWebJsPlugin implements IEnginePlugin {
     const sessionId = config.sessionId as string;
     const sessionDataPath = (this.context?.config.sessionDataPath as string) ?? './data/sessions';
     const headless = (this.context?.config.headless as boolean) ?? true;
-    const puppeteerArgs = (this.context?.config.puppeteerArgs as string[]) ?? [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-    ];
+    const defaultPuppeteerArgs = (
+      process.env.PUPPETEER_ARGS ||
+      '--no-sandbox,--disable-setuid-sandbox,--disable-dev-shm-usage,--disable-gpu,--no-first-run,--no-zygote'
+    ).split(',');
+    const puppeteerArgs = (this.context?.config.puppeteerArgs as string[]) ?? defaultPuppeteerArgs;
 
     const proxyUrl = config.proxyUrl as string | undefined;
     const proxyType = config.proxyType as 'http' | 'https' | 'socks4' | 'socks5' | undefined;

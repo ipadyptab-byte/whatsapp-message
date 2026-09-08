@@ -76,9 +76,9 @@ export class SendMediaMessageDto {
 }
 
 export class MessageResponseDto {
-  @ApiProperty({ example: 'true_628123456789@c.us_3EB0123456789' })
-  messageId: string;
+  @ApiPropertyOptional({ example: 'true_628123456789@c.us_3EB0123456789' })
+  messageId?: string;
 
-  @ApiProperty({ example: 1706868000 })
-  timestamp: number;
+  @ApiPropertyOptional({ example: 1706868000 })
+  timestamp?: number;
 }

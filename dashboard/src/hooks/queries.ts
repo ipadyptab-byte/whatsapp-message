@@ -20,6 +20,7 @@ export const queryKeys = {
   logs: (params: { severity?: string; page: number; limit: number }) =>
     ['logs', params] as const,
   infraStatus: ['infra', 'status'] as const,
+  infraConfig: ['infra', 'config'] as const,
   plugins: ['plugins'] as const,
   engines: ['engines'] as const,
   currentEngine: ['engines', 'current'] as const,
@@ -199,6 +200,14 @@ export function useInfraStatusQuery() {
   return useQuery({
     queryKey: queryKeys.infraStatus,
     queryFn: infraApi.getStatus,
+    staleTime: 30_000,
+  });
+}
+
+export function useInfraConfigQuery() {
+  return useQuery({
+    queryKey: queryKeys.infraConfig,
+    queryFn: infraApi.getConfig,
     staleTime: 30_000,
   });
 }

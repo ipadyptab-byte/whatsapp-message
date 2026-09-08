@@ -19,6 +19,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Languages,
+  Megaphone,
 } from 'lucide-react';
 import { useTheme } from '../hooks/useTheme';
 import { type UserRole } from '../hooks/useRole';
@@ -36,6 +37,7 @@ const allNavItems = [
   { to: '/webhooks', icon: Webhook, key: 'webhooks' as const, adminOnly: false },
   { to: '/api-keys', icon: Key, key: 'apiKeys' as const, adminOnly: true },
   { to: '/message-tester', icon: Send, key: 'messageTester' as const, adminOnly: false },
+  { to: '/marketing', icon: Megaphone, key: 'marketing' as const, adminOnly: false },
   { to: '/infrastructure', icon: Server, key: 'infrastructure' as const, adminOnly: false },
   { to: '/plugins', icon: Puzzle, key: 'plugins' as const, adminOnly: true },
   { to: '/logs', icon: FileText, key: 'logs' as const, adminOnly: false },

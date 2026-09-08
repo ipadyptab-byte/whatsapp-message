@@ -1,0 +1,8 @@
+{
+  "name": "WhatsApp Message App",
+  "description": "Open Source WhatsApp API Gateway",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

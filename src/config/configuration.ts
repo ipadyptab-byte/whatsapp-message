@@ -29,8 +29,13 @@ export default () => ({
   // Data Storage Database configuration (pluggable: SQLite, PostgreSQL, etc.)
   dataDatabase: {
     type: process.env.DATABASE_TYPE || 'sqlite',
-    // SQLite path (used when type is sqlite)
-    database: process.env.DATABASE_NAME || './data/openwa.sqlite',
+    // SQLite path (used when type is sqlite), database name when postgres
+    database:
+      process.env.DATABASE_TYPE === 'postgres'
+        ? (process.env.DATABASE_NAME && !process.env.DATABASE_NAME.includes('.sqlite')
+            ? process.env.DATABASE_NAME
+            : 'openwa')
+        : (process.env.DATABASE_NAME || './data/openwa.sqlite'),
     // PostgreSQL/MySQL connection (used when type is postgres/mysql)
     host: process.env.DATABASE_HOST || 'localhost',
     port: parseInt(process.env.DATABASE_PORT || '5432', 10),
@@ -50,7 +55,10 @@ export default () => ({
     type: process.env.ENGINE_TYPE || 'whatsapp-web.js',
     puppeteer: {
       headless: process.env.PUPPETEER_HEADLESS !== 'false',
-      args: (process.env.PUPPETEER_ARGS || '--no-sandbox,--disable-setuid-sandbox').split(','),
+      args: (
+        process.env.PUPPETEER_ARGS ||
+        '--no-sandbox,--disable-setuid-sandbox,--disable-dev-shm-usage,--disable-gpu,--no-first-run,--no-zygote'
+      ).split(','),
     },
     sessionDataPath: process.env.SESSION_DATA_PATH || './data/sessions',
   },

@@ -40,6 +40,17 @@ export function Sessions() {
       },
       [toast, t],
     ),
+    onQRCode: useCallback(
+      (event: { sessionId: string; qrCode: string }) => {
+        setQrData(prev => {
+          if (prev && prev.sessionId === event.sessionId) {
+            return { ...prev, qrCode: event.qrCode };
+          }
+          return prev;
+        });
+      },
+      []
+    ),
   });
 
   const fetchSessions = async () => {
@@ -65,16 +76,21 @@ export function Sessions() {
   const fetchQR = useCallback(async (sessionId: string) => {
     try {
       const qr = await sessionApi.getQR(sessionId);
-      setQrData({ sessionId, sessionName: currentSessionName.current, qrCode: qr.qrCode });
+      if (qr.qrCode) {
+        setQrData(prev =>
+          prev
+            ? { ...prev, qrCode: qr.qrCode }
+            : { sessionId, sessionName: currentSessionName.current, qrCode: qr.qrCode },
+        );
+      }
       if (qr.status === 'ready') {
         setQrData(null);
         currentSessionName.current = '';
         fetchSessions();
       }
-    } catch {
-      setQrData(null);
-      currentSessionName.current = '';
-      fetchSessions();
+    } catch (err) {
+      // Keep modal open while session is initializing and waiting for QR generation
+      console.warn('QR polling waiting for generation:', err);
     }
   }, []);
 
@@ -150,12 +166,17 @@ export function Sessions() {
   const handleShowQR = async (id: string) => {
     const session = sessions.find(s => s.id === id);
     const sessionName = session?.name || '';
+    
+    // Always open modal in loading state first
+    setQrData({ sessionId: id, sessionName, qrCode: '' });
+
     try {
       const qr = await sessionApi.getQR(id);
-      setQrData({ sessionId: id, sessionName, qrCode: qr.qrCode });
+      if (qr.qrCode) {
+        setQrData({ sessionId: id, sessionName, qrCode: qr.qrCode });
+      }
     } catch (err) {
-      console.error('Failed to get QR:', err);
-      setError(t('sessions.qr.unavailable'));
+      console.warn('Initial getQR pending, auto-refresh polling will update:', err);
     }
   };
 
@@ -389,6 +410,30 @@ export function Sessions() {
               </div>
             </div>
             <div className="modal-footer">
+              {canWrite && selectedSession.status === 'ready' && (
+                <button
+                  className="btn-danger"
+                  onClick={async () => {
+                    await handleStop(selectedSession.id);
+                    setSelectedSession({ ...selectedSession, status: 'disconnected' });
+                  }}
+                >
+                  <Square size={16} />
+                  {t('common.disconnect')}
+                </button>
+              )}
+              {canWrite && ['created', 'idle', 'disconnected'].includes(selectedSession.status) && (
+                <button
+                  className="btn-primary"
+                  onClick={async () => {
+                    await handleStart(selectedSession.id);
+                    setSelectedSession({ ...selectedSession, status: 'initializing' });
+                  }}
+                >
+                  <Play size={16} />
+                  {t('sessions.actions.start')}
+                </button>
+              )}
               <button className="btn-secondary" onClick={() => setSelectedSession(null)}>
                 {t('common.close')}
               </button>
@@ -450,7 +495,6 @@ export function Sessions() {
                   <button
                     className="btn-sm"
                     onClick={() => handleShowQR(session.id)}
-                    disabled={session.status !== 'qr_ready'}
                   >
                     {session.status === 'qr_ready' ? t('sessions.qr.showQr') : t('sessions.qr.loading')}
                   </button>
@@ -483,7 +527,12 @@ export function Sessions() {
                     <Play size={16} />
                     {t('sessions.actions.start')}
                   </button>
-                ) : canWrite && ['ready', 'initializing', 'connecting', 'qr_ready'].includes(session.status) ? (
+                ) : canWrite && session.status === 'ready' ? (
+                  <button className="btn-action danger" onClick={() => handleStop(session.id)} title={t('common.disconnect')}>
+                    <Square size={16} />
+                    {t('common.disconnect')}
+                  </button>
+                ) : canWrite && ['initializing', 'connecting', 'qr_ready'].includes(session.status) ? (
                   <button className="btn-action" onClick={() => handleStop(session.id)}>
                     <Square size={16} />
                     {t('sessions.actions.stop')}

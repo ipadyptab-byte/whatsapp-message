@@ -7,9 +7,9 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository, InjectDataSource } from '@nestjs/typeorm';
-import { Repository, In, DataSource } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { Session, SessionStatus } from './entities/session.entity';
-import { CreateSessionDto } from './dto';
+import { CreateSessionDto, UpdateSessionDto } from './dto';
 import { EngineFactory } from '../../engine/engine.factory';
 import { IWhatsAppEngine, EngineStatus } from '../../engine/interfaces/whatsapp-engine.interface';
 import { createLogger } from '../../common/services/logger.service';
@@ -46,27 +46,46 @@ export class SessionService implements OnModuleDestroy, OnModuleInit {
   ) {}
 
   /**
-   * On backend startup, reset all active session statuses to disconnected
-   * because the engines are not running yet after restart
+   * On backend startup, preserve connected sessions and restore their engines.
+   * Sessions that were connected remain READY unless explicitly disconnected by user.
    */
   async onModuleInit(): Promise<void> {
-    const activeStatuses = [
-      SessionStatus.READY,
-      SessionStatus.INITIALIZING,
-      SessionStatus.QR_READY,
-      SessionStatus.AUTHENTICATING,
-    ];
+    const allSessions = await this.sessionRepository.find();
 
-    const result = await this.sessionRepository.update(
-      { status: In(activeStatuses) },
-      { status: SessionStatus.DISCONNECTED },
+    for (const session of allSessions) {
+      // If session was READY, or was previously connected (has phone number & connected timestamp)
+      if (session.status === SessionStatus.READY || (session.phone && session.connectedAt)) {
+        if (session.status !== SessionStatus.READY) {
+          await this.sessionRepository.update(session.id, { status: SessionStatus.READY });
+          this.eventsGateway.emitSessionStatus(session.id, SessionStatus.READY);
+        }
+
+        this.logger.log(`Preserving connected status for session ${session.name} (${session.id}) and resuming engine`, {
+          sessionId: session.id,
+          phone: session.phone,
+          action: 'startup_auto_restore',
+        });
+
+        // Auto-restore engine in the background
+        this.start(session.id).catch(err => {
+          this.logger.warn(`Background engine restore for session ${session.name} deferred:`, {
+            sessionId: session.id,
+            error: String(err),
+          });
+        });
+      }
+    }
+
+    // Clean up only transitional setup states (INITIALIZING, QR_READY, AUTHENTICATING)
+    // where phone was never linked
+    const transitionalUnlinked = allSessions.filter(
+      s =>
+        !s.phone &&
+        [SessionStatus.INITIALIZING, SessionStatus.QR_READY, SessionStatus.AUTHENTICATING].includes(s.status),
     );
 
-    if (result.affected && result.affected > 0) {
-      this.logger.log(`Reset ${result.affected} session(s) to disconnected on startup`, {
-        action: 'startup_reset',
-        affected: result.affected,
-      });
+    for (const s of transitionalUnlinked) {
+      await this.sessionRepository.update(s.id, { status: SessionStatus.CREATED });
     }
   }
 
@@ -187,8 +206,18 @@ export class SessionService implements OnModuleDestroy, OnModuleInit {
   async start(id: string): Promise<Session> {
     const session = await this.findOne(id);
 
-    if (this.engines.has(id)) {
-      throw new BadRequestException('Session is already started');
+    const existingEngine = this.engines.get(id);
+    if (existingEngine) {
+      if (existingEngine.getStatus() === EngineStatus.READY) {
+        return session;
+      }
+      // If engine exists but is not ready or failed, destroy and recreate
+      try {
+        await existingEngine.destroy();
+      } catch (err) {
+        this.logger.warn(`Could not cleanly destroy existing engine for ${session.name}:`, String(err));
+      }
+      this.engines.delete(id);
     }
 
     // Execute hook before starting
@@ -231,8 +260,9 @@ export class SessionService implements OnModuleDestroy, OnModuleInit {
     });
     this.engines.set(id, engine);
 
-    await engine.initialize({
-      onQRCode: (): void => {
+    try {
+      await engine.initialize({
+        onQRCode: (qrCode: string): void => {
         this.logger.log('QR code generated', {
           sessionId: id,
           action: 'qr_generated',
@@ -241,12 +271,15 @@ export class SessionService implements OnModuleDestroy, OnModuleInit {
         // Execute hook for QR event
         void this.hookManager.execute(
           'session:qr',
-          { sessionId: id },
+          { sessionId: id, qrCode },
           {
             sessionId: id,
             source: 'Engine',
           },
         );
+
+        // Emit real-time QR code event to connected WebSocket clients
+        this.eventsGateway.emitQRCode(id, qrCode);
 
         void this.updateStatus(id, SessionStatus.QR_READY);
       },
@@ -281,6 +314,7 @@ export class SessionService implements OnModuleDestroy, OnModuleInit {
           connectedAt: new Date(),
           lastActiveAt: new Date(),
         });
+        this.eventsGateway.emitSessionStatus(id, SessionStatus.READY);
       },
       onMessage: (message): void => {
         this.logger.debug(`Message received from ${message.from}`, {
@@ -307,9 +341,9 @@ export class SessionService implements OnModuleDestroy, OnModuleInit {
             }
 
             // Dispatch to webhooks with potentially modified message
-            void this.webhookService.dispatch(id, 'message.received', finalMessage as Record<string, unknown>);
+            void this.webhookService.dispatch(id, 'message.received', finalMessage);
             // Emit real-time event to WebSocket clients
-            this.eventsGateway.emitMessage(id, finalMessage as Record<string, unknown>);
+            this.eventsGateway.emitMessage(id, finalMessage);
           });
       },
       onDisconnected: (reason: string): void => {
@@ -329,9 +363,10 @@ export class SessionService implements OnModuleDestroy, OnModuleInit {
           },
         );
 
-        void this.updateStatus(id, SessionStatus.DISCONNECTED);
+        // Keep status as READY if it was connected, do not reset status
+        void this.updateStatus(id, SessionStatus.DISCONNECTED, false);
 
-        // Attempt to reconnect
+        // Attempt to reconnect in background
         this.scheduleReconnect(id, session);
       },
       onStateChanged: (engineState: EngineStatus): void => {
@@ -345,10 +380,14 @@ export class SessionService implements OnModuleDestroy, OnModuleInit {
         };
         const newStatus = statusMap[engineState];
         if (newStatus) {
-          void this.updateStatus(id, newStatus);
+          void this.updateStatus(id, newStatus, false);
         }
       },
     });
+    } catch (err) {
+      this.engines.delete(id);
+      throw err;
+    }
 
     await this.updateStatus(id, SessionStatus.INITIALIZING);
   }
@@ -357,21 +396,12 @@ export class SessionService implements OnModuleDestroy, OnModuleInit {
     const state = this.reconnectStates.get(id);
     if (!state) return;
 
-    if (state.attempts >= state.maxAttempts) {
-      this.logger.error(`Max reconnect attempts reached for session: ${session.name}`, undefined, {
-        sessionId: id,
-        attempts: state.attempts,
-        action: 'reconnect_failed',
-      });
-      return;
-    }
-
-    // Exponential backoff: baseDelay * 2^attempts (with jitter)
-    const delay = state.baseDelay * Math.pow(2, state.attempts) + Math.random() * 1000;
+    // Exponential backoff capped at 30 seconds for persistent reconnection
+    const delay = Math.min(state.baseDelay * Math.pow(1.5, Math.min(state.attempts, 6)) + Math.random() * 1000, 30000);
     state.attempts++;
 
     this.logger.log(
-      `Scheduling reconnect attempt ${state.attempts}/${state.maxAttempts} in ${Math.round(delay / 1000)}s`,
+      `Scheduling reconnect attempt ${state.attempts} in ${Math.round(delay / 1000)}s for session: ${session.name}`,
       {
         sessionId: id,
         attempt: state.attempts,
@@ -433,11 +463,53 @@ export class SessionService implements OnModuleDestroy, OnModuleInit {
       sessionId: id,
       action: 'stop',
     });
-    await this.updateStatus(id, SessionStatus.DISCONNECTED);
+    await this.updateStatus(id, SessionStatus.DISCONNECTED, true);
     return this.findOne(id);
   }
 
-  async getQRCode(id: string): Promise<{ qrCode: string; status: SessionStatus }> {
+  async update(id: string, dto: UpdateSessionDto): Promise<Session> {
+    const session = await this.findOne(id);
+
+    if (dto.name && dto.name !== session.name) {
+      const existing = await this.sessionRepository.findOne({
+        where: { name: dto.name },
+      });
+      if (existing && existing.id !== id) {
+        throw new ConflictException(`Session with name '${dto.name}' already exists`);
+      }
+      session.name = dto.name;
+    }
+
+    if (dto.config) {
+      session.config = { ...session.config, ...dto.config };
+    }
+
+    if (dto.proxyUrl !== undefined) {
+      session.proxyUrl = dto.proxyUrl;
+    }
+
+    if (dto.proxyType !== undefined) {
+      session.proxyType = dto.proxyType;
+    }
+
+    if (dto.status !== undefined && dto.status !== session.status) {
+      if (dto.status === SessionStatus.DISCONNECTED) {
+        await this.stop(id);
+      } else {
+        await this.updateStatus(id, dto.status, true);
+        if (dto.status === SessionStatus.READY && !this.engines.has(id)) {
+          this.start(id).catch(err => {
+            this.logger.warn(`Failed to start engine after setting status to READY: ${err}`);
+          });
+        }
+      }
+    }
+
+    await this.sessionRepository.save(session);
+    return this.findOne(id);
+  }
+
+  async getQRCode(id: string): Promise<{ qrCode: string | null; status: SessionStatus }> {
     const session = await this.findOne(id);
     const engine = this.engines.get(id);
 
@@ -447,15 +519,12 @@ export class SessionService implements OnModuleDestroy, OnModuleInit {
 
     const qrCode = engine.getQRCode();
 
-    if (!qrCode) {
-      if (session.status === SessionStatus.READY) {
-        throw new BadRequestException('Session is already authenticated, no QR code needed');
-      }
-      throw new BadRequestException('QR code is not ready yet. Please wait...');
+    if (!qrCode && session.status === SessionStatus.READY) {
+      throw new BadRequestException('Session is already authenticated, no QR code needed');
     }
 
     return {
-      qrCode,
+      qrCode: qrCode || null,
       status: session.status,
     };
   }
@@ -468,18 +537,40 @@ export class SessionService implements OnModuleDestroy, OnModuleInit {
     await this.findOne(id); // Verify session exists
     const engine = this.engines.get(id);
 
-    if (!engine) {
-      throw new BadRequestException('Session is not started');
+    if (!engine || engine.getStatus() !== EngineStatus.READY) {
+      return [];
     }
 
-    const groups = await engine.getGroups();
-    return groups.map(g => ({
-      id: g.id,
-      name: g.name,
-    }));
+    try {
+      const groups = await engine.getGroups();
+      return groups.map(g => ({
+        id: g.id,
+        name: g.name,
+      }));
+    } catch (err) {
+      this.logger.warn(`Could not fetch groups for session ${id}: ${String(err)}`);
+      return [];
+    }
   }
 
-  private async updateStatus(id: string, status: SessionStatus): Promise<void> {
+  private async updateStatus(id: string, status: SessionStatus, force: boolean = false): Promise<void> {
+    const current = await this.sessionRepository.findOne({ where: { id } });
+    if (!current) return;
+
+    // Rule: "if its connected then until i disconnect it should be connected"
+    // Never change status away from READY unless user explicitly disconnects (force = true)
+    if (current.status === SessionStatus.READY && status !== SessionStatus.READY && !force) {
+      this.logger.log(
+        `Preserving READY status for session ${current.name} (${id}) - suppressed automatic change to ${status}`,
+        {
+          sessionId: id,
+          currentStatus: current.status,
+          suppressedStatus: status,
+        },
+      );
+      return;
+    }
+
     await this.sessionRepository.update(id, { status });
     this.logger.debug(`Session status updated to ${status}`, {
       sessionId: id,

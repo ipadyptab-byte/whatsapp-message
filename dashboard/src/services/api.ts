@@ -85,8 +85,20 @@ export interface HealthStatus {
 }
 
 export interface InfraStatus {
-  database: { connected: boolean; type: string; host: string };
-  redis: { connected: boolean; host: string; port: number };
+  database: {
+    connected: boolean;
+    type: string;
+    host: string;
+    port?: number;
+    database?: string;
+    username?: string;
+    apiKeyCount?: number;
+    sessionCount?: number;
+    sslEnabled?: boolean;
+    poolSize?: number;
+    builtIn?: boolean;
+  };
+  redis: { connected: boolean; host: string; port: number; enabled?: boolean };
   queue: {
     enabled: boolean;
     messages: { pending: number; completed: number; failed: number };
@@ -133,6 +145,24 @@ export interface SaveConfigPayload {
     sessionDataPath?: string;
     browserArgs?: string;
   };
+  server?: {
+    port?: string;
+    nodeEnv?: string;
+    domain?: string;
+    dashboardPort?: string;
+    baseUrl?: string;
+    dashboardUrl?: string;
+    corsOrigins?: string;
+  };
+  webhook?: {
+    timeout?: number;
+    maxRetries?: number;
+    retryDelay?: number;
+  };
+  rateLimit?: {
+    ttl?: number;
+    max?: number;
+  };
 }
 
 export interface Settings {
@@ -148,8 +178,8 @@ export interface Settings {
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
 
-  // Get API key from sessionStorage for authentication
-  const apiKey = sessionStorage.getItem('openwa_api_key');
+  // Get API key from localStorage or sessionStorage for authentication
+  const apiKey = localStorage.getItem('openwa_api_key') || sessionStorage.getItem('openwa_api_key');
 
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
@@ -186,6 +216,11 @@ export const sessionApi = {
   delete: (id: string) => request<void>(`/sessions/${id}`, { method: 'DELETE' }),
   start: (id: string) => request<Session>(`/sessions/${id}/start`, { method: 'POST' }),
   stop: (id: string) => request<Session>(`/sessions/${id}/stop`, { method: 'POST' }),
+  update: (id: string, data: Partial<Pick<Session, 'name' | 'status'>>) =>
+    request<Session>(`/sessions/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
   getQR: (id: string) => request<{ qrCode: string; status: string }>(`/sessions/${id}/qr`),
   getStats: () => request<SessionStats>('/sessions/stats/overview'),
   getGroups: (id: string) => request<{ id: string; name: string }[]>(`/sessions/${id}/groups`),
@@ -264,31 +299,112 @@ export const auditApi = {
 // Message API
 // =============================================================================
 
+export interface SendMediaOptions {
+  chatId: string;
+  url?: string;
+  base64?: string;
+  mimetype?: string;
+  filename?: string;
+  caption?: string;
+}
+
 export const messageApi = {
   sendText: (sessionId: string, chatId: string, text: string) =>
     request<MessageResponse>(`/sessions/${sessionId}/messages/send-text`, {
       method: 'POST',
       body: JSON.stringify({ chatId, text }),
     }),
-  sendImage: (sessionId: string, chatId: string, url: string, caption?: string) =>
-    request<MessageResponse>(`/sessions/${sessionId}/messages/send-image`, {
+  sendImage: (sessionId: string, chatIdOrOptions: string | SendMediaOptions, url?: string, caption?: string) => {
+    const body = typeof chatIdOrOptions === 'string' ? { chatId: chatIdOrOptions, url, caption } : chatIdOrOptions;
+    return request<MessageResponse>(`/sessions/${sessionId}/messages/send-image`, {
       method: 'POST',
-      body: JSON.stringify({ chatId, url, caption }),
+      body: JSON.stringify(body),
+    });
+  },
+  sendVideo: (sessionId: string, chatIdOrOptions: string | SendMediaOptions, url?: string, caption?: string) => {
+    const body = typeof chatIdOrOptions === 'string' ? { chatId: chatIdOrOptions, url, caption } : chatIdOrOptions;
+    return request<MessageResponse>(`/sessions/${sessionId}/messages/send-video`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  },
+  sendAudio: (sessionId: string, chatIdOrOptions: string | SendMediaOptions, url?: string) => {
+    const body = typeof chatIdOrOptions === 'string' ? { chatId: chatIdOrOptions, url } : chatIdOrOptions;
+    return request<MessageResponse>(`/sessions/${sessionId}/messages/send-audio`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  },
+  sendDocument: (sessionId: string, chatIdOrOptions: string | SendMediaOptions, url?: string, filename?: string) => {
+    const body = typeof chatIdOrOptions === 'string' ? { chatId: chatIdOrOptions, url, filename } : chatIdOrOptions;
+    return request<MessageResponse>(`/sessions/${sessionId}/messages/send-document`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  },
+};
+
+// =============================================================================
+// Bulk Message & Campaign API
+// =============================================================================
+
+export interface BulkMessageItem {
+  chatId: string;
+  type: 'text' | 'image' | 'video' | 'audio' | 'document';
+  content: {
+    text?: string;
+    caption?: string;
+    image?: { url?: string; base64?: string; mimetype?: string };
+    video?: { url?: string; base64?: string; mimetype?: string };
+    audio?: { url?: string; base64?: string; mimetype?: string };
+    document?: { url?: string; base64?: string; mimetype?: string; filename?: string };
+  };
+  variables?: Record<string, string>;
+}
+
+export interface SendBulkMessagePayload {
+  batchId?: string;
+  messages: BulkMessageItem[];
+  options?: {
+    delayBetweenMessages?: number;
+    randomizeDelay?: boolean;
+    stopOnError?: boolean;
+  };
+}
+
+export interface BulkMessageResponse {
+  batchId: string;
+  status: string;
+  totalMessages: number;
+  estimatedCompletionTime?: string;
+  statusUrl: string;
+}
+
+export interface BatchStatusResponse {
+  batchId: string;
+  status: string;
+  progress: {
+    total: number;
+    sent: number;
+    failed: number;
+    pending: number;
+    cancelled: number;
+  };
+  createdAt: string;
+  completedAt?: string;
+}
+
+export const bulkMessageApi = {
+  sendBulk: (sessionId: string, payload: SendBulkMessagePayload) =>
+    request<BulkMessageResponse>(`/sessions/${sessionId}/messages/send-bulk`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
     }),
-  sendVideo: (sessionId: string, chatId: string, url: string, caption?: string) =>
-    request<MessageResponse>(`/sessions/${sessionId}/messages/send-video`, {
+  getBatchStatus: (sessionId: string, batchId: string) =>
+    request<BatchStatusResponse>(`/sessions/${sessionId}/messages/batch/${batchId}`),
+  cancelBatch: (sessionId: string, batchId: string) =>
+    request<BatchStatusResponse>(`/sessions/${sessionId}/messages/batch/${batchId}/cancel`, {
       method: 'POST',
-      body: JSON.stringify({ chatId, url, caption }),
-    }),
-  sendAudio: (sessionId: string, chatId: string, url: string) =>
-    request<MessageResponse>(`/sessions/${sessionId}/messages/send-audio`, {
-      method: 'POST',
-      body: JSON.stringify({ chatId, url }),
-    }),
-  sendDocument: (sessionId: string, chatId: string, url: string, filename?: string) =>
-    request<MessageResponse>(`/sessions/${sessionId}/messages/send-document`, {
-      method: 'POST',
-      body: JSON.stringify({ chatId, url, filename }),
     }),
 };
 
@@ -303,6 +419,21 @@ export const healthApi = {
 
 export const infraApi = {
   getStatus: () => request<InfraStatus>('/infra/status'),
+  getConfig: () => request<SaveConfigPayload>('/infra/config'),
+  testDatabase: (config: SaveConfigPayload['database']) =>
+    request<{
+      success: boolean;
+      message: string;
+      details?: {
+        version?: string;
+        database?: string;
+        apiKeyCount?: number;
+        latencyMs?: number;
+      };
+    }>('/infra/database/test', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    }),
   updateConfig: (config: Partial<InfraStatus>) =>
     request<InfraStatus>('/infra/config', {
       method: 'PUT',
@@ -390,4 +521,17 @@ export const pluginsApi = {
   healthCheck: (id: string) => request<{ healthy: boolean; message?: string }>(`/plugins/${id}/health`),
   getEngines: () => request<Engine[]>('/infra/engines'),
   getCurrentEngine: () => request<{ engineType: string }>('/infra/engines/current'),
+};
+
+// =============================================================================
+// Auth API
+// =============================================================================
+
+export const authApi = {
+  getCurrentKey: () => request<{ apiKey: string; role: string }>('/auth/current-key'),
+  validate: (key: string) =>
+    request<{ valid: boolean; role?: string }>('/auth/validate', {
+      method: 'POST',
+      headers: { 'X-API-Key': key },
+    }),
 };

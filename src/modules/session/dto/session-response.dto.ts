@@ -34,8 +34,9 @@ export class QRCodeResponseDto {
   @ApiProperty({
     description: 'QR code as data URL',
     example: 'data:image/png;base64,...',
+    nullable: true,
   })
-  qrCode: string;
+  qrCode: string | null;
 
   @ApiProperty({ enum: SessionStatus, example: SessionStatus.QR_READY })
   status: SessionStatus;

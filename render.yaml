@@ -28,7 +28,7 @@ services:
       - key: PUPPETEER_HEADLESS
         value: "true"
       - key: PUPPETEER_ARGS
-        value: "--no-sandbox,--disable-setuid-sandbox,--disable-dev-shm-usage"
+        value: "--no-sandbox,--disable-setuid-sandbox,--disable-dev-shm-usage,--disable-gpu,--no-first-run,--no-zygote"
       - key: STORAGE_TYPE
         value: local
       - key: STORAGE_LOCAL_PATH

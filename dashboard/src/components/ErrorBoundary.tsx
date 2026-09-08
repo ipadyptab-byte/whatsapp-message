@@ -23,6 +23,19 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('[ErrorBoundary] Uncaught error:', error, errorInfo);
+    const msg = error?.message || '';
+    if (
+      msg.includes('Failed to fetch dynamically imported module') ||
+      msg.includes('Importing a module script failed') ||
+      msg.includes('error loading dynamically imported module')
+    ) {
+      const reloadKey = 'openwa_module_reload_attempt';
+      const lastAttempt = sessionStorage.getItem(reloadKey);
+      if (!lastAttempt || Date.now() - parseInt(lastAttempt, 10) > 10000) {
+        sessionStorage.setItem(reloadKey, String(Date.now()));
+        window.location.reload();
+      }
+    }
   }
 
   handleReload = () => {

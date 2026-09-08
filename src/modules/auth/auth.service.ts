@@ -1,12 +1,15 @@
-import { Injectable, NotFoundException, UnauthorizedException, OnModuleInit } from '@nestjs/common';
+import { Injectable, NotFoundException, UnauthorizedException, OnModuleInit, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { createHash, randomBytes } from 'crypto';
-import { existsSync, writeFileSync, readFileSync } from 'fs';
-import { join } from 'path';
+import { existsSync, writeFileSync, readFileSync, mkdirSync } from 'fs';
+import { join, dirname } from 'path';
 import { ApiKey, ApiKeyRole } from './entities/api-key.entity';
+import { User } from './entities/user.entity';
 import { CreateApiKeyDto, UpdateApiKeyDto } from './dto';
 import { createLogger } from '../../common/services/logger.service';
+import { RegisterDto } from './dto/register.dto';
+import { LoginDto } from './dto/login.dto';
 
 const API_KEY_FILE = join(process.cwd(), 'data', '.api-key');
 
@@ -17,41 +20,68 @@ export class AuthService implements OnModuleInit {
   constructor(
     @InjectRepository(ApiKey, 'main')
     private readonly apiKeyRepository: Repository<ApiKey>,
+    @InjectRepository(User, 'main')
+    private readonly userRepository: Repository<User>,
   ) {}
 
-  async onModuleInit(): Promise<void> {
-    // Seed a default API key if none exist
-    const count = await this.apiKeyRepository.count();
-    let displayKey: string;
-    let isNewKey = false;
+  /**
+   * Retrieves or seeds a stable, persistent API key without randomizing on every restart.
+   * Checks process.env.API_KEY, process.env.DEFAULT_API_KEY, data/.api-key, or falls back to 'dev-admin-key'.
+   * Ensures the key is always present, active, and valid in the database.
+   */
+  async getOrSeedPermanentApiKey(): Promise<string> {
+    let key = process.env.API_KEY || process.env.DEFAULT_API_KEY;
 
-    if (count === 0) {
-      // Use predictable key in development, random key in production
-      displayKey =
-        process.env.NODE_ENV === 'production' ? `owa_k1_${randomBytes(32).toString('hex')}` : 'dev-admin-key';
-
-      await this.seedApiKey(displayKey, 'Default Admin Key', ApiKeyRole.ADMIN);
-      isNewKey = true;
-
-      // Save raw key to file for startup script to read
+    if (!key && existsSync(API_KEY_FILE)) {
       try {
-        writeFileSync(API_KEY_FILE, displayKey, 'utf-8');
-      } catch (err) {
-        this.logger.warn('Could not save API key file', { error: String(err) });
-      }
-    } else {
-      // Read saved API key from file if exists
-      if (existsSync(API_KEY_FILE)) {
-        try {
-          displayKey = readFileSync(API_KEY_FILE, 'utf-8').trim();
-        } catch (error) {
-          this.logger.warn(`Failed to read API key file: ${API_KEY_FILE}`, { error: String(error) });
-          displayKey = '(check dashboard for keys)';
+        const fileContent = readFileSync(API_KEY_FILE, 'utf-8').trim();
+        if (fileContent && !fileContent.includes('(check dashboard')) {
+          key = fileContent;
         }
-      } else {
-        displayKey = '(check dashboard for keys)';
+      } catch (err) {
+        this.logger.warn(`Failed to read API key file: ${API_KEY_FILE}`, { error: String(err) });
       }
     }
+
+    if (!key) {
+      key = 'dev-admin-key';
+    }
+
+    // Always ensure this permanent key is seeded and active in the database
+    try {
+      const keyHash = this.hashKey(key);
+      let apiKey = await this.apiKeyRepository.findOne({ where: { keyHash } });
+      if (!apiKey) {
+        apiKey = await this.seedApiKey(key, 'Default Admin Key', ApiKeyRole.ADMIN);
+      } else if (!apiKey.isActive) {
+        apiKey.isActive = true;
+        await this.apiKeyRepository.save(apiKey);
+      }
+    } catch (err) {
+      this.logger.warn('Could not ensure permanent API key in database', { error: String(err) });
+    }
+
+    // Save to file so that it remains persistent across restarts
+    try {
+      const dir = dirname(API_KEY_FILE);
+      if (!existsSync(dir)) {
+        mkdirSync(dir, { recursive: true });
+      }
+      writeFileSync(API_KEY_FILE, key, 'utf-8');
+    } catch (err) {
+      this.logger.warn('Could not save API key file', { error: String(err) });
+    }
+
+    return key;
+  }
+
+  async getCurrentAdminKey(): Promise<{ apiKey: string; role: string }> {
+    const apiKey = await this.getOrSeedPermanentApiKey();
+    return { apiKey, role: 'admin' };
+  }
+
+  async onModuleInit(): Promise<void> {
+    const displayKey = await this.getOrSeedPermanentApiKey();
 
     // Always show the welcome banner on startup
     const apiBaseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 2785}`;
@@ -65,11 +95,7 @@ export class AuthService implements OnModuleInit {
     this.logger.log(`  📊 Dashboard: ${dashboardUrl}`);
     this.logger.log(`  📚 API Docs:  ${apiBaseUrl}/api/docs`);
     this.logger.log('');
-    if (isNewKey) {
-      this.logger.log('  🔑 API Key (newly created):');
-    } else {
-      this.logger.log('  🔑 API Key:');
-    }
+    this.logger.log('  🔑 API Key (Persistent):');
     this.logger.log(`     ${displayKey}`);
     this.logger.log('');
     this.logger.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -159,14 +185,29 @@ export class AuthService implements OnModuleInit {
 
   async validateApiKey(rawKey: string, clientIp?: string, sessionId?: string): Promise<ApiKey> {
     const keyHash = this.hashKey(rawKey);
-    const apiKey = await this.apiKeyRepository.findOne({ where: { keyHash } });
+    let apiKey = await this.apiKeyRepository.findOne({ where: { keyHash } });
+
+    if (!apiKey) {
+      // Check if it matches the permanent admin API key and auto-seed if needed
+      const permanentKey = await this.getOrSeedPermanentApiKey();
+      if (rawKey === permanentKey) {
+        apiKey = await this.apiKeyRepository.findOne({ where: { keyHash } });
+      }
+    }
 
     if (!apiKey) {
       throw new UnauthorizedException('Invalid API key');
     }
 
     if (!apiKey.isActive) {
-      throw new UnauthorizedException('API key is revoked');
+      // If it matches the permanent key, re-activate it
+      const permanentKey = await this.getOrSeedPermanentApiKey();
+      if (rawKey === permanentKey) {
+        apiKey.isActive = true;
+        await this.apiKeyRepository.save(apiKey);
+      } else {
+        throw new UnauthorizedException('API key is revoked');
+      }
     }
 
     if (apiKey.expiresAt && apiKey.expiresAt < new Date()) {
@@ -264,5 +305,49 @@ export class AuthService implements OnModuleInit {
     };
 
     return roleHierarchy[apiKey.role] >= roleHierarchy[requiredRole];
+  }
+
+  async registerUser(dto: RegisterDto): Promise<void> {
+    const existing = await this.userRepository.findOne({ where: { username: dto.username } });
+    if (existing) {
+      throw new ConflictException('Username already exists');
+    }
+
+    const hashedPassword = createHash('sha256').update(dto.password).digest('hex');
+    const user = this.userRepository.create({
+      username: dto.username,
+      password: hashedPassword,
+      role: 'admin',
+    });
+    await this.userRepository.save(user);
+  }
+
+  async loginUser(dto: LoginDto): Promise<{ apiKey: string; role: string }> {
+    const envUser = process.env.DASHBOARD_USER || 'admin';
+    const envPass = process.env.DASHBOARD_PASSWORD || 'password';
+
+    let userRole = '';
+    let isValid = false;
+
+    // Check environment credentials first
+    if (dto.username === envUser && dto.password === envPass) {
+      isValid = true;
+      userRole = 'admin';
+    } else {
+      // Check database credentials
+      const hashedPassword = createHash('sha256').update(dto.password).digest('hex');
+      const user = await this.userRepository.findOne({ where: { username: dto.username, password: hashedPassword } });
+      if (user) {
+        isValid = true;
+        userRole = user.role;
+      }
+    }
+
+    if (isValid) {
+      const apiKey = await this.getOrSeedPermanentApiKey();
+      return { apiKey, role: userRole };
+    }
+
+    throw new UnauthorizedException('Invalid username or password');
   }
 }

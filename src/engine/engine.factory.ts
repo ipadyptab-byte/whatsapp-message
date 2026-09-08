@@ -98,7 +98,14 @@ export class EngineFactory implements OnModuleInit {
       sessionDataPath: this.configService.get<string>('engine.sessionDataPath') ?? './data/sessions',
       puppeteer: {
         headless: this.configService.get<boolean>('engine.puppeteer.headless') ?? true,
-        args: this.configService.get<string[]>('engine.puppeteer.args') ?? ['--no-sandbox', '--disable-setuid-sandbox'],
+        args: this.configService.get<string[]>('engine.puppeteer.args') ?? [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+          '--no-first-run',
+          '--no-zygote',
+        ],
       },
       proxy: options.proxyUrl
         ? {

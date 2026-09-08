@@ -64,7 +64,7 @@ app.use('/socket.io', createProxyMiddleware({
 }));
 
 // SPA fallback - serve index.html for all non-API routes
-app.get('*', (req, res) => {
+app.use((req, res) => {
   const indexPath = path.join(DASHBOARD_PATH, 'index.html');
   console.log('Serving fallback for:', req.path, 'from:', indexPath);
   res.sendFile(indexPath, (err) => {

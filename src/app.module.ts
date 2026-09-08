@@ -45,18 +45,46 @@ if (process.env.QUEUE_ENABLED === 'true') {
       load: [configuration],
     }),
 
-    // Main Database (always SQLite - boot config)
+    // Main Database (SQLite for local boot or PostgreSQL when postgres is configured)
     TypeOrmModule.forRootAsync({
       name: 'main',
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
-        type: 'sqlite' as const,
-        database: configService.get<string>('database.database', './data/main.sqlite'),
-        entities: [__dirname + '/modules/auth/**/*.entity{.ts,.js}', __dirname + '/modules/audit/**/*.entity{.ts,.js}'],
-        synchronize: true,
-        logging: configService.get<boolean>('database.logging', false),
-      }),
+      useFactory: (configService: ConfigService) => {
+        const dbType = configService.get<'sqlite' | 'postgres'>('dataDatabase.type', 'sqlite');
+        if (dbType === 'postgres') {
+          return {
+            type: 'postgres' as const,
+            host: configService.get<string>('dataDatabase.host', 'localhost'),
+            port: configService.get<number>('dataDatabase.port', 5432),
+            username: configService.get<string>('dataDatabase.username', 'postgres'),
+            password: configService.get<string>('dataDatabase.password', ''),
+            database: configService.get<string>('dataDatabase.database', 'openwa'),
+            entities: [
+              __dirname + '/modules/auth/**/*.entity{.ts,.js}',
+              __dirname + '/modules/audit/**/*.entity{.ts,.js}',
+            ],
+            ssl: configService.get<boolean>('dataDatabase.ssl')
+              ? { rejectUnauthorized: configService.get<boolean>('dataDatabase.sslRejectUnauthorized', false) }
+              : false,
+            synchronize: true,
+            logging: configService.get<boolean>('database.logging', false),
+            extra: {
+              max: configService.get<number>('dataDatabase.poolSize', 10),
+            },
+          };
+        }
+        return {
+          type: 'sqlite' as const,
+          database: configService.get<string>('database.database', './data/main.sqlite'),
+          entities: [
+            __dirname + '/modules/auth/**/*.entity{.ts,.js}',
+            __dirname + '/modules/audit/**/*.entity{.ts,.js}',
+          ],
+          synchronize: true,
+          logging: configService.get<boolean>('database.logging', false),
+        };
+      },
     }),
 
     // Data Storage Database (pluggable - user data)
@@ -80,13 +108,16 @@ if (process.env.QUEUE_ENABLED === 'true') {
           return {
             ...baseConfig,
             type: 'postgres' as const,
-            host: configService.get<string>('dataDatabase.host'),
-            port: configService.get<number>('dataDatabase.port'),
-            username: configService.get<string>('dataDatabase.username'),
-            password: configService.get<string>('dataDatabase.password'),
-            database: 'openwa',
-            // Never auto-sync Postgres in production; rely on migrations.
-            synchronize: configService.get<boolean>('dataDatabase.synchronize', false),
+            host: configService.get<string>('dataDatabase.host', 'localhost'),
+            port: configService.get<number>('dataDatabase.port', 5432),
+            username: configService.get<string>('dataDatabase.username', 'postgres'),
+            password: configService.get<string>('dataDatabase.password', ''),
+            database: configService.get<string>('dataDatabase.database', 'openwa'),
+            ssl: configService.get<boolean>('dataDatabase.ssl')
+              ? { rejectUnauthorized: configService.get<boolean>('dataDatabase.sslRejectUnauthorized', false) }
+              : false,
+            // Run migrations or auto-sync
+            synchronize: configService.get<boolean>('dataDatabase.synchronize', true),
             migrationsRun: true,
             retryAttempts: 10,
             retryDelay: 3000,
