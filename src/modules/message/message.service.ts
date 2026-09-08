@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, ServiceUnavailableException } from '@nestjs/common';
+import { Injectable, BadRequestException, ServiceUnavailableException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { SessionService } from '../session/session.service';
@@ -15,6 +15,8 @@ export interface GetMessagesOptions {
 
 @Injectable()
 export class MessageService {
+  private readonly logger = new Logger(MessageService.name);
+
   constructor(
     @InjectRepository(Message, 'data')
     private readonly messageRepository: Repository<Message>,
@@ -84,7 +86,7 @@ export class MessageService {
 
   async sendImage(sessionId: string, dto: SendMediaMessageDto): Promise<MessageResponseDto> {
     const engine = this.getEngine(sessionId);
-    const media = this.buildMediaInput(dto);
+    const media = this.buildMediaInput(dto, 'image');
 
     // Save message as pending BEFORE sending
     const message = await this.saveOutgoingMessage(sessionId, {
@@ -107,6 +109,9 @@ export class MessageService {
         timestamp: result.timestamp,
       };
     } catch (error) {
+      this.logger.error(
+        `Failed to send image for session ${sessionId} to ${dto.chatId}: ${error instanceof Error ? error.stack || error.message : String(error)}`,
+      );
       message.status = MessageStatus.FAILED;
       await this.messageRepository.save(message);
       throw error;
@@ -115,7 +120,7 @@ export class MessageService {
 
   async sendVideo(sessionId: string, dto: SendMediaMessageDto): Promise<MessageResponseDto> {
     const engine = this.getEngine(sessionId);
-    const media = this.buildMediaInput(dto);
+    const media = this.buildMediaInput(dto, 'video');
 
     // Save message as pending BEFORE sending
     const message = await this.saveOutgoingMessage(sessionId, {
@@ -138,6 +143,9 @@ export class MessageService {
         timestamp: result.timestamp,
       };
     } catch (error) {
+      this.logger.error(
+        `Failed to send video for session ${sessionId} to ${dto.chatId}: ${error instanceof Error ? error.stack || error.message : String(error)}`,
+      );
       message.status = MessageStatus.FAILED;
       await this.messageRepository.save(message);
       throw error;
@@ -146,7 +154,7 @@ export class MessageService {
 
   async sendAudio(sessionId: string, dto: SendMediaMessageDto): Promise<MessageResponseDto> {
     const engine = this.getEngine(sessionId);
-    const media = this.buildMediaInput(dto);
+    const media = this.buildMediaInput(dto, 'audio');
 
     // Save message as pending BEFORE sending
     const message = await this.saveOutgoingMessage(sessionId, {
@@ -168,6 +176,9 @@ export class MessageService {
         timestamp: result.timestamp,
       };
     } catch (error) {
+      this.logger.error(
+        `Failed to send audio for session ${sessionId} to ${dto.chatId}: ${error instanceof Error ? error.stack || error.message : String(error)}`,
+      );
       message.status = MessageStatus.FAILED;
       await this.messageRepository.save(message);
       throw error;
@@ -176,7 +187,7 @@ export class MessageService {
 
   async sendDocument(sessionId: string, dto: SendMediaMessageDto): Promise<MessageResponseDto> {
     const engine = this.getEngine(sessionId);
-    const media = this.buildMediaInput(dto);
+    const media = this.buildMediaInput(dto, 'document');
 
     // Save message as pending BEFORE sending
     const message = await this.saveOutgoingMessage(sessionId, {
@@ -199,6 +210,9 @@ export class MessageService {
         timestamp: result.timestamp,
       };
     } catch (error) {
+      this.logger.error(
+        `Failed to send document for session ${sessionId} to ${dto.chatId}: ${error instanceof Error ? error.stack || error.message : String(error)}`,
+      );
       message.status = MessageStatus.FAILED;
       await this.messageRepository.save(message);
       throw error;
@@ -480,7 +494,10 @@ export class MessageService {
     return engine;
   }
 
-  private buildMediaInput(dto: SendMediaMessageDto): MediaInput {
+  private buildMediaInput(
+    dto: SendMediaMessageDto,
+    defaultType?: 'image' | 'video' | 'audio' | 'document',
+  ): MediaInput {
     if (!dto.url && !dto.base64) {
       throw new BadRequestException('Either url or base64 must be provided');
     }
@@ -490,12 +507,22 @@ export class MessageService {
     }
 
     let base64Data = dto.base64;
-    if (base64Data && base64Data.includes(';base64,')) {
-      base64Data = base64Data.split(';base64,')[1];
+    if (base64Data) {
+      if (base64Data.includes(';base64,')) {
+        base64Data = base64Data.split(';base64,')[1];
+      }
+      base64Data = base64Data.replace(/\s+/g, '');
+    }
+
+    let mimetype = dto.mimetype;
+    if (!mimetype || mimetype === 'application/octet-stream') {
+      if (defaultType === 'image') mimetype = 'image/jpeg';
+      else if (defaultType === 'video') mimetype = 'video/mp4';
+      else if (defaultType === 'audio') mimetype = 'audio/ogg';
     }
 
     return {
-      mimetype: dto.mimetype || 'application/octet-stream',
+      mimetype: mimetype || 'application/octet-stream',
       data: dto.url || base64Data!,
       filename: dto.filename,
       caption: dto.caption,

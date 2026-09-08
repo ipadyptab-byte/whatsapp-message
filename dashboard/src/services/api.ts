@@ -190,8 +190,12 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
   const response = await fetch(url, { ...options, headers });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ message: response.statusText }));
-    throw new Error(error.message || `HTTP ${response.status}`);
+    const errorData = await response.json().catch(() => ({ message: response.statusText }));
+    const errorMsg =
+      errorData?.error?.message ||
+      errorData?.message ||
+      (typeof errorData === 'string' ? errorData : `HTTP ${response.status}`);
+    throw new Error(errorMsg);
   }
 
   if (response.status === 204) {

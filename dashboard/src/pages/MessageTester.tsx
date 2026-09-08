@@ -137,12 +137,29 @@ export function MessageTester() {
       const dataUrl = reader.result as string;
       const base64Data = dataUrl.includes(';base64,') ? dataUrl.split(';base64,')[1] : dataUrl;
 
+      let resolvedType = file.type;
+      if (!resolvedType || resolvedType === 'application/octet-stream') {
+        const ext = file.name.split('.').pop()?.toLowerCase();
+        if (ext === 'jpg' || ext === 'jpeg') resolvedType = 'image/jpeg';
+        else if (ext === 'png') resolvedType = 'image/png';
+        else if (ext === 'webp') resolvedType = 'image/webp';
+        else if (ext === 'gif') resolvedType = 'image/gif';
+        else if (ext === 'mp4') resolvedType = 'video/mp4';
+        else if (ext === 'mp3') resolvedType = 'audio/mp3';
+        else if (ext === 'ogg') resolvedType = 'audio/ogg';
+        else if (ext === 'pdf') resolvedType = 'application/pdf';
+        else if (messageType === 'image') resolvedType = 'image/jpeg';
+        else if (messageType === 'video') resolvedType = 'video/mp4';
+        else if (messageType === 'audio') resolvedType = 'audio/ogg';
+        else resolvedType = 'application/octet-stream';
+      }
+
       setUploadedFile({
         name: file.name,
         size: file.size,
-        type: file.type || 'application/octet-stream',
+        type: resolvedType,
         base64: base64Data,
-        previewUrl: file.type.startsWith('image/') ? dataUrl : undefined,
+        previewUrl: resolvedType.startsWith('image/') ? dataUrl : undefined,
       });
     };
     reader.onerror = () => {
@@ -228,6 +245,14 @@ export function MessageTester() {
             : {
                 chatId,
                 url: mediaUrl.trim(),
+                mimetype:
+                  messageType === 'image'
+                    ? 'image/jpeg'
+                    : messageType === 'video'
+                    ? 'video/mp4'
+                    : messageType === 'audio'
+                    ? 'audio/ogg'
+                    : undefined,
                 filename: messageType === 'document' ? (content.trim() || undefined) : undefined,
                 caption: messageType !== 'audio' && messageType !== 'document' ? (content.trim() || undefined) : undefined,
               };

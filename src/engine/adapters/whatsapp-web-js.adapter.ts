@@ -78,10 +78,10 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
+        '--disable-gpu',
         '--no-first-run',
         '--no-zygote',
-        '--disable-gpu',
+        '--disable-extensions',
       ];
 
       // Add proxy configuration if provided
@@ -161,6 +161,11 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
           args: puppeteerArgs,
           timeout: 120000,
           ...(chromiumBinary ? { executablePath: chromiumBinary } : {}),
+        },
+        webVersionCache: {
+          type: 'remote',
+          remotePath: 'https://raw.githubusercontent.com/wwebjs/web-versions/main/html/{version}.html',
+          strict: false,
         },
         authTimeoutMs: 120000,
         qrMaxRetries: 10,
@@ -399,47 +404,229 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
   }
 
   async sendImageMessage(chatId: string, media: MediaInput): Promise<MessageResult> {
-    return this.sendMediaMessage(chatId, media);
+    return this.sendMediaMessage(chatId, media, 'image/jpeg');
   }
 
   async sendVideoMessage(chatId: string, media: MediaInput): Promise<MessageResult> {
-    return this.sendMediaMessage(chatId, media);
+    return this.sendMediaMessage(chatId, media, 'video/mp4');
   }
 
   async sendAudioMessage(chatId: string, media: MediaInput): Promise<MessageResult> {
-    return this.sendMediaMessage(chatId, media);
+    return this.sendMediaMessage(chatId, media, 'audio/ogg', { sendAudioAsVoice: true });
   }
 
   async sendDocumentMessage(chatId: string, media: MediaInput): Promise<MessageResult> {
-    return this.sendMediaMessage(chatId, media);
+    return this.sendMediaMessage(chatId, media, 'application/octet-stream');
   }
 
-  private async sendMediaMessage(chatId: string, media: MediaInput): Promise<MessageResult> {
-    this.ensureReady();
+  private detectMimeFromBase64(b64: string): string {
+    const head = b64.slice(0, 30);
+    if (head.startsWith('/9j/')) return 'image/jpeg';
+    if (head.startsWith('iVBORw0KGgo')) return 'image/png';
+    if (head.startsWith('R0lGOD')) return 'image/gif';
+    if (head.startsWith('UklGR')) return 'image/webp';
+    if (head.startsWith('JVBERi')) return 'application/pdf';
+    if (head.startsWith('AAAA') || head.includes('ftyp')) return 'video/mp4';
+    if (head.startsWith('OggS')) return 'audio/ogg';
+    if (head.startsWith('ID3') || head.startsWith('//u')) return 'audio/mp3';
+    return 'image/jpeg';
+  }
 
-    let messageMedia: MessageMedia;
+  private detectMimeFromBuffer(buf: Buffer): string {
+    if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) {
+      return 'image/jpeg';
+    }
+    if (
+      buf.length >= 8 &&
+      buf[0] === 0x89 &&
+      buf[1] === 0x50 &&
+      buf[2] === 0x4e &&
+      buf[3] === 0x47 &&
+      buf[4] === 0x0d &&
+      buf[5] === 0x0a &&
+      buf[6] === 0x1a &&
+      buf[7] === 0x0a
+    ) {
+      return 'image/png';
+    }
+    if (buf.length >= 6 && buf.toString('ascii', 0, 6).startsWith('GIF8')) {
+      return 'image/gif';
+    }
+    if (buf.length >= 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') {
+      return 'image/webp';
+    }
+    if (buf.length >= 4 && buf.toString('ascii', 0, 4) === '%PDF') {
+      return 'application/pdf';
+    }
+    if (buf.length >= 4 && (buf.toString('ascii', 4, 8) === 'ftyp' || buf.toString('ascii', 0, 4) === 'ftyp')) {
+      return 'video/mp4';
+    }
+    if (buf.length >= 4 && buf.toString('ascii', 0, 4) === 'OggS') {
+      return 'audio/ogg';
+    }
+    if (buf.length >= 3 && buf.toString('ascii', 0, 3) === 'ID3') {
+      return 'audio/mp3';
+    }
+    return 'application/octet-stream';
+  }
 
+  private getExtensionForMime(mime: string): string {
+    const cleanMime = (mime || '').split(';')[0].trim().toLowerCase();
+    switch (cleanMime) {
+      case 'image/jpeg':
+      case 'image/jpg':
+        return 'jpg';
+      case 'image/png':
+        return 'png';
+      case 'image/webp':
+        return 'webp';
+      case 'image/gif':
+        return 'gif';
+      case 'video/mp4':
+        return 'mp4';
+      case 'audio/ogg':
+      case 'audio/opus':
+        return 'ogg';
+      case 'audio/mp3':
+      case 'audio/mpeg':
+        return 'mp3';
+      case 'application/pdf':
+        return 'pdf';
+      case 'application/zip':
+        return 'zip';
+      default:
+        return 'bin';
+    }
+  }
+
+  private async prepareMessageMedia(media: MediaInput, defaultMime = 'image/jpeg'): Promise<MessageMedia> {
     if (typeof media.data === 'string') {
       if (media.data.startsWith('http://') || media.data.startsWith('https://')) {
-        // URL
-        messageMedia = await MessageMedia.fromUrl(media.data);
-      } else {
-        // Base64
-        messageMedia = new MessageMedia(media.mimetype, media.data, media.filename);
+        // Fetch URL safely with timeout
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 30000);
+          const res = await fetch(media.data, {
+            signal: controller.signal,
+            headers: {
+              'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            },
+          });
+          clearTimeout(timeoutId);
+
+          if (!res.ok) {
+            throw new Error(`Failed to fetch media from URL ${media.data}: ${res.status} ${res.statusText}`);
+          }
+
+          const arrayBuffer = await res.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+          let mime = res.headers.get('content-type')?.split(';')[0]?.trim();
+          if (!mime || mime === 'application/octet-stream') {
+            const detected = this.detectMimeFromBuffer(buffer);
+            mime = detected !== 'application/octet-stream' ? detected : (media.mimetype || defaultMime);
+          }
+          const ext = this.getExtensionForMime(mime);
+          let filename = media.filename;
+          if (!filename) {
+            try {
+              const urlPath = new URL(media.data).pathname;
+              const baseName = path.basename(urlPath);
+              filename = baseName && path.extname(baseName) ? baseName : `media_${Date.now()}.${ext}`;
+            } catch {
+              filename = `media_${Date.now()}.${ext}`;
+            }
+          } else if (!path.extname(filename)) {
+            filename = `${filename}.${ext}`;
+          }
+
+          return new MessageMedia(mime, buffer.toString('base64'), filename);
+        } catch (fetchErr) {
+          this.logger.warn(
+            `Direct fetch failed for URL ${media.data}, falling back to MessageMedia.fromUrl: ${fetchErr instanceof Error ? fetchErr.message : String(fetchErr)}`,
+          );
+          return MessageMedia.fromUrl(media.data, { unsafeMime: true });
+        }
       }
-    } else {
-      // Buffer
-      messageMedia = new MessageMedia(media.mimetype, media.data.toString('base64'), media.filename);
+
+      // Base64 string
+      let base64 = media.data;
+      if (base64.includes(';base64,')) {
+        base64 = base64.split(';base64,')[1];
+      }
+      base64 = base64.replace(/\s+/g, '');
+
+      let mime = media.mimetype;
+      if (!mime || mime === 'application/octet-stream') {
+        mime = this.detectMimeFromBase64(base64) || defaultMime;
+      }
+      const ext = this.getExtensionForMime(mime);
+      let filename = media.filename;
+      if (!filename) {
+        filename = `media_${Date.now()}.${ext}`;
+      } else if (!path.extname(filename)) {
+        filename = `${filename}.${ext}`;
+      }
+
+      return new MessageMedia(mime, base64, filename);
     }
 
-    const msg = await this.client!.sendMessage(chatId, messageMedia, {
-      caption: media.caption,
-    });
+    // Buffer
+    const buffer = media.data;
+    let mime = media.mimetype;
+    if (!mime || mime === 'application/octet-stream') {
+      const detected = this.detectMimeFromBuffer(buffer);
+      mime = detected !== 'application/octet-stream' ? detected : defaultMime;
+    }
+    const ext = this.getExtensionForMime(mime);
+    let filename = media.filename;
+    if (!filename) {
+      filename = `media_${Date.now()}.${ext}`;
+    } else if (!path.extname(filename)) {
+      filename = `${filename}.${ext}`;
+    }
 
-    return {
-      id: msg?.id?._serialized,
-      timestamp: msg?.timestamp,
-    };
+    return new MessageMedia(mime, buffer.toString('base64'), filename);
+  }
+
+  private async sendMediaMessage(
+    chatId: string,
+    media: MediaInput,
+    defaultMime = 'image/jpeg',
+    extraOptions?: Record<string, unknown>,
+  ): Promise<MessageResult> {
+    this.ensureReady();
+
+    let targetChatId = chatId.trim();
+    if (!targetChatId.includes('@')) {
+      targetChatId = targetChatId.replace(/[^0-9]/g, '') + '@c.us';
+    }
+
+    const messageMedia = await this.prepareMessageMedia(media, defaultMime);
+
+    this.logger.log(
+      `Sending media to ${targetChatId} (mimetype: ${messageMedia.mimetype}, filename: ${messageMedia.filename}, dataLength: ${messageMedia.data?.length || 0})`,
+    );
+
+    try {
+      const msg = await this.client!.sendMessage(targetChatId, messageMedia, {
+        caption: media.caption,
+        ...extraOptions,
+      });
+
+      if (!msg) {
+        throw new Error(`WhatsApp client returned empty response when sending media to ${targetChatId}`);
+      }
+
+      return {
+        id: msg.id?._serialized,
+        timestamp: msg.timestamp,
+      };
+    } catch (err) {
+      const detail = err instanceof Error ? (err.stack || err.message) : String(err);
+      this.logger.error(`sendMediaMessage failed for ${targetChatId}: ${detail}`);
+      throw err;
+    }
   }
 
   async getContacts(): Promise<Contact[]> {
