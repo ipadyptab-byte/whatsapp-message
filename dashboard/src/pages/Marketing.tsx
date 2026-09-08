@@ -15,6 +15,9 @@ import {
   AlertCircle,
   Loader2,
   FileCheck,
+  Sparkles,
+  Eye,
+  UserCheck,
 } from 'lucide-react';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { PageHeader } from '../components/PageHeader';
@@ -23,6 +26,18 @@ import { bulkMessageApi, messageApi, type BulkMessageItem } from '../services/ap
 import './Marketing.css';
 
 const MAX_FILE_SIZE_BYTES = 30 * 1024 * 1024; // 30MB limit
+
+export interface RecipientContact {
+  phone: string;
+  name: string;
+}
+
+export interface CsvParseSummary {
+  total: number;
+  withName: number;
+  colName?: string;
+  colPhone?: string;
+}
 
 type MessageType = 'text' | 'image' | 'video' | 'audio' | 'document';
 
@@ -63,6 +78,253 @@ function getAcceptedMimeTypes(type: MessageType): string {
   }
 }
 
+function parseCsvLine(line: string): string[] {
+  const result: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if ((char === ',' || char === ';' || char === '\t') && !inQuotes) {
+      result.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  result.push(current.trim());
+  return result.map(cell => cell.replace(/^["']|["']$/g, '').trim());
+}
+
+function sanitizePhoneNumber(str: string): string {
+  return str.replace(/[^0-9]/g, '');
+}
+
+function isLikelyPhoneNumber(str: string): boolean {
+  const digits = sanitizePhoneNumber(str);
+  return digits.length >= 7 && digits.length <= 16 && (digits.length / Math.max(1, str.trim().length)) >= 0.45;
+}
+
+export function parseContactsFromCsv(text: string): {
+  contacts: RecipientContact[];
+  summary: CsvParseSummary;
+  error?: string;
+} {
+  const rawLines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (rawLines.length === 0) {
+    return { contacts: [], summary: { total: 0, withName: 0 }, error: 'CSV file is empty' };
+  }
+
+  const rows = rawLines.map(parseCsvLine).filter(r => r.length > 0 && r.some(c => c.length > 0));
+  if (rows.length === 0) {
+    return { contacts: [], summary: { total: 0, withName: 0 }, error: 'No data rows found in CSV' };
+  }
+
+  const headerRow = rows[0];
+  const lowerHeaders = headerRow.map(h => h.toLowerCase());
+
+  const hasHeaderKeywords = lowerHeaders.some(h =>
+    /name|phone|mobile|cell|tel|number|contact|recipient|customer|client/.test(h)
+  );
+
+  let startRow = 0;
+  let nameColIdx = -1;
+  let firstNameColIdx = -1;
+  let lastNameColIdx = -1;
+  let phoneColIdx = -1;
+  let detectedColName = '';
+  let detectedColPhone = '';
+
+  if (hasHeaderKeywords) {
+    startRow = 1;
+    phoneColIdx = lowerHeaders.findIndex(h => /phone|mobile|tel|cell|whatsapp|contact.*num|number/.test(h));
+    if (phoneColIdx === -1) {
+      phoneColIdx = lowerHeaders.findIndex(h => /number|contact/.test(h));
+    }
+
+    nameColIdx = lowerHeaders.findIndex(h =>
+      /(^|\b)(full[_\s]?name|name|recipient|customer|client|contact[_\s]?name)(\b|$)/.test(h)
+    );
+    if (nameColIdx === -1) {
+      firstNameColIdx = lowerHeaders.findIndex(h => /first[_\s]?name|fname/.test(h));
+      lastNameColIdx = lowerHeaders.findIndex(h => /last[_\s]?name|lname|surname/.test(h));
+    }
+
+    if (phoneColIdx !== -1) detectedColPhone = headerRow[phoneColIdx];
+    if (nameColIdx !== -1) detectedColName = headerRow[nameColIdx];
+    else if (firstNameColIdx !== -1) detectedColName = 'First + Last Name';
+  }
+
+  // Infer missing columns from data rows if needed
+  if (phoneColIdx === -1 || (nameColIdx === -1 && firstNameColIdx === -1)) {
+    const sampleRows = rows.slice(startRow, Math.min(rows.length, startRow + 10));
+    const colCount = Math.max(...sampleRows.map(r => r.length));
+
+    if (phoneColIdx === -1) {
+      let bestPhoneScore = -1;
+      for (let c = 0; c < colCount; c++) {
+        const phoneMatches = sampleRows.filter(r => r[c] && isLikelyPhoneNumber(r[c])).length;
+        if (phoneMatches > bestPhoneScore) {
+          bestPhoneScore = phoneMatches;
+          phoneColIdx = c;
+        }
+      }
+      if (phoneColIdx !== -1) {
+        detectedColPhone = `Column ${phoneColIdx + 1}`;
+      }
+    }
+
+    if (nameColIdx === -1 && firstNameColIdx === -1) {
+      for (let c = 0; c < colCount; c++) {
+        if (c === phoneColIdx) continue;
+        const textMatches = sampleRows.filter(r => r[c] && /[a-zA-Z\u00C0-\u024F\u0900-\u097F]/.test(r[c])).length;
+        if (textMatches > 0) {
+          nameColIdx = c;
+          detectedColName = `Column ${c + 1}`;
+          break;
+        }
+      }
+      if (nameColIdx === -1 && colCount === 2) {
+        nameColIdx = phoneColIdx === 0 ? 1 : 0;
+        detectedColName = `Column ${nameColIdx + 1}`;
+      }
+    }
+  }
+
+  const contactsMap = new Map<string, RecipientContact>();
+
+  for (let r = startRow; r < rows.length; r++) {
+    const row = rows[r];
+    let phone = '';
+
+    if (phoneColIdx !== -1 && row[phoneColIdx]) {
+      phone = sanitizePhoneNumber(row[phoneColIdx]);
+    } else {
+      for (let c = 0; c < row.length; c++) {
+        if (isLikelyPhoneNumber(row[c])) {
+          phone = sanitizePhoneNumber(row[c]);
+          break;
+        }
+      }
+    }
+
+    if (phone.length < 7 || phone.length > 16) continue;
+
+    let name = '';
+    if (nameColIdx !== -1 && row[nameColIdx]) {
+      name = row[nameColIdx].trim();
+    } else if (firstNameColIdx !== -1) {
+      const first = row[firstNameColIdx]?.trim() || '';
+      const last = lastNameColIdx !== -1 ? (row[lastNameColIdx]?.trim() || '') : '';
+      name = `${first} ${last}`.trim();
+    } else {
+      for (let c = 0; c < row.length; c++) {
+        if (c !== phoneColIdx && sanitizePhoneNumber(row[c]) !== phone && /[a-zA-Z]/.test(row[c])) {
+          name = row[c].trim();
+          break;
+        }
+      }
+    }
+
+    if (!contactsMap.has(phone) || (!contactsMap.get(phone)!.name && name)) {
+      contactsMap.set(phone, { phone, name });
+    }
+  }
+
+  const contacts = Array.from(contactsMap.values());
+  const withName = contacts.filter(c => Boolean(c.name)).length;
+
+  if (contacts.length === 0) {
+    return {
+      contacts: [],
+      summary: { total: 0, withName: 0 },
+      error: 'No valid phone numbers found in CSV. Ensure numbers include country code (e.g. 14155552671 or 919876543210).',
+    };
+  }
+
+  return {
+    contacts,
+    summary: {
+      total: contacts.length,
+      withName,
+      colName: detectedColName,
+      colPhone: detectedColPhone,
+    },
+  };
+}
+
+function parseManualContacts(rawText: string): RecipientContact[] {
+  if (!rawText.trim()) return [];
+  const lines = rawText.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const result: RecipientContact[] = [];
+  const seen = new Set<string>();
+
+  for (const line of lines) {
+    const parts = line.split(/[,;\t]/);
+    if (parts.length === 2 && !isLikelyPhoneNumber(parts[0]) && isLikelyPhoneNumber(parts[1])) {
+      const name = parts[0].trim();
+      const phone = sanitizePhoneNumber(parts[1]);
+      if (phone.length >= 7 && phone.length <= 16 && !seen.has(phone)) {
+        seen.add(phone);
+        result.push({ phone, name });
+      }
+      continue;
+    }
+    if (parts.length === 2 && isLikelyPhoneNumber(parts[0]) && !isLikelyPhoneNumber(parts[1])) {
+      const phone = sanitizePhoneNumber(parts[0]);
+      const name = parts[1].trim();
+      if (phone.length >= 7 && phone.length <= 16 && !seen.has(phone)) {
+        seen.add(phone);
+        result.push({ phone, name });
+      }
+      continue;
+    }
+
+    const splitByColonOrDash = line.split(/[:\-]/);
+    if (splitByColonOrDash.length === 2) {
+      const [p1, p2] = splitByColonOrDash;
+      if (!isLikelyPhoneNumber(p1) && isLikelyPhoneNumber(p2)) {
+        const phone = sanitizePhoneNumber(p2);
+        if (phone.length >= 7 && phone.length <= 16 && !seen.has(phone)) {
+          seen.add(phone);
+          result.push({ phone, name: p1.trim() });
+          continue;
+        }
+      }
+    }
+
+    const phone = sanitizePhoneNumber(line);
+    if (phone.length >= 7 && phone.length <= 16 && !seen.has(phone)) {
+      seen.add(phone);
+      result.push({ phone, name: '' });
+    }
+  }
+
+  return result;
+}
+
+export function formatPersonalizedMessage(
+  template: string,
+  contactName: string,
+  prefixGreeting: boolean,
+  greetingTemplate: string
+): string {
+  let result = template.trim();
+  const hasNamePlaceholder = /\{name\}|\{\{name\}\}|\{Name\}|\{\{Name\}\}|\{NAME\}|\{\{NAME\}\}/i.test(result);
+
+  if (hasNamePlaceholder) {
+    const replacement = contactName.trim() || '';
+    result = result.replace(/\{\{?name\}?\}|\{\{?Name\}?\}|\{\{?NAME\}?\}/gi, replacement);
+    result = result.replace(/\s{2,}/g, ' ').trim();
+  } else if (prefixGreeting && contactName.trim()) {
+    const greeting = greetingTemplate.replace(/\{\{?name\}?\}|\{\{?Name\}?\}|\{\{?NAME\}?\}/gi, contactName.trim());
+    result = `${greeting.trim()} ${result}`.trim();
+  }
+
+  return result;
+}
+
 export function Marketing() {
   const { t } = useTranslation();
   useDocumentTitle(t('nav.marketing') || 'Marketing');
@@ -72,9 +334,10 @@ export function Marketing() {
 
   // Target audience
   const [inputMode, setInputMode] = useState<'csv' | 'manual'>('csv');
-  const [contacts, setContacts] = useState('');
+  const [contactsText, setContactsText] = useState('');
   const [csvFile, setCsvFile] = useState<File | null>(null);
-  const [parsedCsvContacts, setParsedCsvContacts] = useState<string[]>([]);
+  const [parsedCsvContacts, setParsedCsvContacts] = useState<RecipientContact[]>([]);
+  const [csvSummary, setCsvSummary] = useState<CsvParseSummary | null>(null);
   const [csvError, setCsvError] = useState<string | null>(null);
 
   // Message & Media composition
@@ -84,8 +347,13 @@ export function Marketing() {
   const [uploadedFile, setUploadedFile] = useState<UploadedFileState | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [message, setMessage] = useState('');
+  const [message, setMessage] = useState('Hello {name}, we are excited to share our latest updates with you!');
   const [documentFilename, setDocumentFilename] = useState('');
+
+  // Personalization settings
+  const [prefixGreeting, setPrefixGreeting] = useState<boolean>(false);
+  const [greetingTemplate, setGreetingTemplate] = useState<string>('Hello {name},');
+  const [previewContactIdx, setPreviewContactIdx] = useState<number>(0);
 
   // Sending options
   const [delayBetweenMessages, setDelayBetweenMessages] = useState<number>(3000);
@@ -111,6 +379,7 @@ export function Marketing() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvInputRef = useRef<HTMLInputElement>(null);
+  const messageInputRef = useRef<HTMLTextAreaElement>(null);
 
   // Auto-select first active session
   useEffect(() => {
@@ -120,14 +389,13 @@ export function Marketing() {
     }
   }, [sessions, selectedSessionId]);
 
-  // Extract phone numbers from manual input
+  // Extract recipients from manual input
   const manualRecipients = useMemo(() => {
-    if (!contacts.trim()) return [];
-    return contacts
-      .split(/[\n,;]+/)
-      .map(p => p.trim().replace(/[^0-9]/g, ''))
-      .filter(p => p.length >= 7);
-  }, [contacts]);
+    return parseManualContacts(contactsText);
+  }, [contactsText]);
+
+  // Active target contacts list
+  const targetContacts = inputMode === 'csv' ? parsedCsvContacts : manualRecipients;
 
   // Handle CSV file upload & parsing
   const handleCsvChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -141,40 +409,49 @@ export function Marketing() {
     reader.onload = () => {
       try {
         const text = reader.result as string;
-        const lines = text.split(/\r?\n/);
-        const extracted: string[] = [];
+        const parseResult = parseContactsFromCsv(text);
 
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          // split by comma or semicolon
-          const cells = line.split(/[,;\t]/);
-          for (const cell of cells) {
-            const cleaned = cell.trim().replace(/['"]/g, '').replace(/[^0-9]/g, '');
-            // check if length is valid for international phone numbers (usually 8 to 15 digits)
-            if (cleaned.length >= 7 && cleaned.length <= 16) {
-              extracted.push(cleaned);
-              break; // Found one valid number in row, move to next line
-            }
+        if (parseResult.error) {
+          setCsvError(parseResult.error);
+          setParsedCsvContacts([]);
+          setCsvSummary(null);
+        } else {
+          setParsedCsvContacts(parseResult.contacts);
+          setCsvSummary(parseResult.summary);
+          setPreviewContactIdx(0);
+          // If message does not currently have {name}, enable prefix greeting automatically
+          if (!/\{name\}/i.test(message)) {
+            setPrefixGreeting(true);
           }
         }
-
-        // Deduplicate
-        const uniqueContacts = Array.from(new Set(extracted));
-        if (uniqueContacts.length === 0) {
-          setCsvError('No valid phone numbers found in CSV file. Ensure numbers contain country code.');
-          setParsedCsvContacts([]);
-        } else {
-          setParsedCsvContacts(uniqueContacts);
-        }
       } catch {
-        setCsvError('Failed to parse CSV file');
+        setCsvError('Failed to parse CSV file. Please check file formatting.');
         setParsedCsvContacts([]);
+        setCsvSummary(null);
       }
     };
     reader.onerror = () => {
       setCsvError('Failed to read CSV file');
     };
     reader.readAsText(file);
+  };
+
+  // Insert {name} tag at current cursor position in message textarea
+  const handleInsertNameTag = () => {
+    const textarea = messageInputRef.current;
+    const tag = '{name}';
+    if (!textarea) {
+      setMessage(prev => (prev ? `${prev} ${tag}` : `Hello ${tag}, `));
+      return;
+    }
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const newMsg = message.substring(0, start) + tag + message.substring(end);
+    setMessage(newMsg);
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start + tag.length, start + tag.length);
+    }, 0);
   };
 
   // Process media file for message upload
@@ -245,13 +522,10 @@ export function Marketing() {
     }
   };
 
-  // Active target phone numbers
-  const targetNumbers = inputMode === 'csv' ? parsedCsvContacts : manualRecipients;
-
   // Validation
   const isSubmitDisabled =
     !selectedSessionId ||
-    targetNumbers.length === 0 ||
+    targetContacts.length === 0 ||
     (messageType === 'text' && !message.trim()) ||
     (messageType !== 'text' && mediaSource === 'upload' && !uploadedFile) ||
     (messageType !== 'text' && mediaSource === 'url' && !mediaUrl.trim()) ||
@@ -263,44 +537,66 @@ export function Marketing() {
 
     setIsSending(true);
     setCampaignProgress({
-      total: targetNumbers.length,
+      total: targetContacts.length,
       sent: 0,
       failed: 0,
-      pending: targetNumbers.length,
+      pending: targetContacts.length,
       status: 'running',
     });
 
-    const messagesList: BulkMessageItem[] = targetNumbers.map(phone => {
-      const chatId = `${phone}@c.us`;
+    // Build personalized messages for all contacts
+    const messagesList: BulkMessageItem[] = targetContacts.map(contact => {
+      const chatId = `${contact.phone}@c.us`;
+      const personalizedText = formatPersonalizedMessage(
+        message,
+        contact.name,
+        prefixGreeting,
+        greetingTemplate
+      );
+      const personalizedCaption = formatPersonalizedMessage(
+        message,
+        contact.name,
+        prefixGreeting,
+        greetingTemplate
+      );
+
+      const variables: Record<string, string> = {
+        name: contact.name || '',
+        Name: contact.name || '',
+      };
+
       if (messageType === 'text') {
         return {
           chatId,
           type: 'text',
-          content: { text: message.trim() },
+          content: { text: personalizedText },
+          variables,
         };
       } else if (messageType === 'image') {
         return {
           chatId,
           type: 'image',
           content: {
-            caption: message.trim() || undefined,
+            caption: personalizedCaption || undefined,
             image:
               mediaSource === 'upload' && uploadedFile
                 ? { base64: uploadedFile.base64, mimetype: uploadedFile.type }
                 : { url: mediaUrl.trim() },
           },
+          variables,
         };
       } else if (messageType === 'video') {
         return {
           chatId,
           type: 'video',
           content: {
-            caption: message.trim() || undefined,
+            caption: personalizedCaption || undefined,
             video:
               mediaSource === 'upload' && uploadedFile
                 ? { base64: uploadedFile.base64, mimetype: uploadedFile.type }
                 : { url: mediaUrl.trim() },
           },
+          variables,
         };
       } else if (messageType === 'audio') {
         return {
@@ -312,6 +608,7 @@ export function Marketing() {
                 ? { base64: uploadedFile.base64, mimetype: uploadedFile.type }
                 : { url: mediaUrl.trim() },
           },
+          variables,
         };
       } else {
         // Document
@@ -319,7 +616,7 @@ export function Marketing() {
           chatId,
           type: 'document',
           content: {
-            caption: message.trim() || undefined,
+            caption: personalizedCaption || undefined,
             document:
               mediaSource === 'upload' && uploadedFile
                 ? {
@@ -332,6 +629,7 @@ export function Marketing() {
                     filename: documentFilename.trim() || 'document',
                   },
           },
+          variables,
         };
       }
     });
@@ -450,11 +748,20 @@ export function Marketing() {
   const selectedSession = sessions.find(s => s.id === selectedSessionId);
   const isSessionReady = selectedSession?.status === 'ready';
 
+  // Preview contact info
+  const previewContact = targetContacts[previewContactIdx] || targetContacts[0] || { name: 'Customer Name', phone: '14155552671' };
+  const renderedPreviewText = formatPersonalizedMessage(
+    message,
+    previewContact.name,
+    prefixGreeting,
+    greetingTemplate
+  );
+
   return (
     <div className="marketing-page" id="marketing-page">
       <PageHeader
         title={t('nav.marketing') || 'Marketing Campaigns'}
-        subtitle="Broadcast text, images, videos, audio, or documents to your contact lists with automated batch delivery."
+        subtitle="Broadcast personalized messages with recipient names, images, videos, or documents to your contact lists."
       />
 
       <div className="marketing-card" id="marketing-campaign-card">
@@ -506,7 +813,7 @@ export function Marketing() {
                 <Upload size={24} />
               </div>
               <span className="card-title">Upload CSV File</span>
-              <p className="card-desc">Import a contact list or spreadsheet</p>
+              <p className="card-desc">Import contacts with names and numbers</p>
             </div>
           </label>
 
@@ -524,7 +831,7 @@ export function Marketing() {
                 <Users size={24} />
               </div>
               <span className="card-title">Manual Entry</span>
-              <p className="card-desc">Paste phone numbers directly</p>
+              <p className="card-desc">Paste "Name, Phone" or phone numbers</p>
             </div>
           </label>
         </div>
@@ -543,16 +850,69 @@ export function Marketing() {
                 disabled={isSending}
               />
               <span className="hint">
-                Upload a CSV containing phone numbers in international format (e.g. 14155552671 or 919876543210).
+                Supports CSV spreadsheets with columns like <strong>Name, Phone</strong> or <strong>First Name, Last Name, Mobile</strong>. Numbers must contain country codes (e.g. 14155552671 or 919876543210).
               </span>
 
               {csvFile && parsedCsvContacts.length > 0 && (
-                <div className="audience-badge">
-                  <FileCheck size={14} />
-                  <span>
-                    {parsedCsvContacts.length} valid recipient{parsedCsvContacts.length === 1 ? '' : 's'} detected in {csvFile.name}
-                  </span>
-                </div>
+                <>
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
+                    <div className="audience-badge">
+                      <FileCheck size={14} />
+                      <span>
+                        {parsedCsvContacts.length} recipient{parsedCsvContacts.length === 1 ? '' : 's'} in {csvFile.name}
+                      </span>
+                    </div>
+
+                    {csvSummary && csvSummary.withName > 0 && (
+                      <div className="audience-badge" style={{ background: 'rgba(59, 130, 246, 0.1)', color: '#2563eb' }}>
+                        <UserCheck size={14} />
+                        <span>
+                          {csvSummary.withName} with names detected {csvSummary.colName ? `(${csvSummary.colName})` : ''}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Contacts preview table */}
+                  <div className="contacts-preview-box" id="csv-contacts-preview-box">
+                    <div className="contacts-preview-header">
+                      <span>Imported Contacts Preview</span>
+                      <span>Showing {Math.min(parsedCsvContacts.length, 50)} of {parsedCsvContacts.length}</span>
+                    </div>
+                    <div className="contacts-table-scroll">
+                      <table className="contacts-table">
+                        <thead>
+                          <tr>
+                            <th style={{ width: '40px' }}>#</th>
+                            <th>Contact Name</th>
+                            <th>Phone Number</th>
+                            <th>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {parsedCsvContacts.slice(0, 50).map((c, idx) => (
+                            <tr key={`${c.phone}-${idx}`}>
+                              <td>{idx + 1}</td>
+                              <td>
+                                {c.name ? (
+                                  <span className="contact-name-badge">{c.name}</span>
+                                ) : (
+                                  <span className="contact-no-name">— (No name in CSV)</span>
+                                )}
+                              </td>
+                              <td style={{ fontFamily: 'monospace' }}>+{c.phone}</td>
+                              <td>
+                                <span style={{ color: 'var(--primary)', fontWeight: 500, fontSize: '0.75rem' }}>
+                                  Ready
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </>
               )}
 
               {csvError && (
@@ -564,22 +924,25 @@ export function Marketing() {
             </div>
           ) : (
             <div className="form-group">
-              <label htmlFor="manual-contacts">Phone Numbers (comma or newline separated)</label>
+              <label htmlFor="manual-contacts">
+                Contacts List (one per line, e.g. "John Doe, 14155552671" or "14155552671")
+              </label>
               <textarea
                 id="manual-contacts"
-                placeholder="e.g. 14155552671, 919876543210, 447700900077"
-                value={contacts}
-                onChange={e => setContacts(e.target.value)}
+                placeholder="Devi Jewellers, 912162228131&#10;John Doe, 14155552671&#10;Jane Smith, 447700900077"
+                value={contactsText}
+                onChange={e => setContactsText(e.target.value)}
                 className="contacts-textarea"
                 disabled={isSending}
               />
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span className="hint">Enter numbers with country code, without + or spaces.</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <span className="hint">Format: "Name, Phone" or numbers with country code.</span>
                 {manualRecipients.length > 0 && (
                   <div className="audience-badge">
                     <Users size={14} />
                     <span>
-                      {manualRecipients.length} valid recipient{manualRecipients.length === 1 ? '' : 's'}
+                      {manualRecipients.length} recipient{manualRecipients.length === 1 ? '' : 's'} (
+                      {manualRecipients.filter(c => Boolean(c.name)).length} with names)
                     </span>
                   </div>
                 )}
@@ -590,8 +953,8 @@ export function Marketing() {
 
         <div className="divider"></div>
 
-        {/* Step 3: Compose Message & Upload Media provision */}
-        <h3 className="section-title">3. Compose Message & Media</h3>
+        {/* Step 3: Compose Message & Personalization */}
+        <h3 className="section-title">3. Compose Personalized Message & Media</h3>
 
         {/* Message Type Selector */}
         <div className="form-group" style={{ marginBottom: '1rem' }}>
@@ -763,6 +1126,52 @@ export function Marketing() {
           </div>
         )}
 
+        {/* Personalization Variable Insert Bar */}
+        <div className="variable-bar" id="personalization-variable-bar">
+          <div className="variable-bar-left">
+            <span className="variable-bar-label">
+              <Sparkles size={15} color="var(--primary)" />
+              Personalize with CSV name:
+            </span>
+            <button
+              type="button"
+              className="variable-tag-btn"
+              onClick={handleInsertNameTag}
+              title="Click to insert {name} placeholder"
+              disabled={isSending}
+            >
+              + {'{name}'}
+            </button>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <label className="personalization-toggle-label">
+              <input
+                type="checkbox"
+                checked={prefixGreeting}
+                onChange={e => setPrefixGreeting(e.target.checked)}
+                disabled={isSending}
+              />
+              <span>Auto-greeting prefix if not in message</span>
+            </label>
+
+            {prefixGreeting && (
+              <select
+                className="session-select"
+                style={{ width: 'auto', padding: '0.25rem 0.5rem', fontSize: '0.8125rem' }}
+                value={greetingTemplate}
+                onChange={e => setGreetingTemplate(e.target.value)}
+                disabled={isSending}
+              >
+                <option value="Hello {name},">Hello {"{name}"},</option>
+                <option value="Hi {name},">Hi {"{name}"},</option>
+                <option value="Dear {name},">Dear {"{name}"},</option>
+                <option value="{name},">{"{name}"},</option>
+              </select>
+            )}
+          </div>
+        </div>
+
         {/* Message / Caption Input */}
         <div className="form-group">
           <label htmlFor="campaign-message">
@@ -771,10 +1180,11 @@ export function Marketing() {
           <div className="message-composer">
             <MessageSquare size={18} className="composer-icon" />
             <textarea
+              ref={messageInputRef}
               id="campaign-message"
               placeholder={
                 messageType === 'text'
-                  ? 'Type your marketing message here...'
+                  ? 'e.g. Hello {name}, your special offer is ready!'
                   : 'Add an optional caption for your media message...'
               }
               value={message}
@@ -784,11 +1194,55 @@ export function Marketing() {
             />
           </div>
           <span className="hint">
-            {messageType === 'text'
-              ? 'This text will be delivered to all selected contacts.'
-              : 'Caption will accompany the uploaded media in the chat.'}
+            Tip: Use <code>{'{name}'}</code> anywhere in the message. Each recipient will receive their real name from the CSV file.
           </span>
         </div>
+
+        {/* Live Personalization Preview Box */}
+        {targetContacts.length > 0 && (
+          <div className="live-preview-box" id="live-message-preview-box">
+            <div className="live-preview-header">
+              <div className="live-preview-title">
+                <Eye size={15} color="var(--primary)" />
+                <span>Live Personalization Preview (as seen by recipient)</span>
+              </div>
+              {targetContacts.length > 1 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Preview for:</span>
+                  <select
+                    className="live-preview-recipient-select"
+                    value={previewContactIdx}
+                    onChange={e => setPreviewContactIdx(Number(e.target.value))}
+                  >
+                    {targetContacts.slice(0, 10).map((c, i) => (
+                      <option key={`${c.phone}-${i}`} value={i}>
+                        {c.name ? `${c.name} (+${c.phone})` : `+${c.phone}`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+
+            <div className="preview-bubble-wrapper">
+              <div className="preview-recipient-info">
+                To: {previewContact.name ? <strong>{previewContact.name}</strong> : 'Contact'} (+{previewContact.phone})
+              </div>
+              <div className="preview-whatsapp-bubble">
+                {messageType !== 'text' && (
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.375rem', marginBottom: '0.375rem', color: 'var(--primary)', fontWeight: 600, fontSize: '0.75rem' }}>
+                    {messageType === 'image' && <ImageIcon size={14} />}
+                    {messageType === 'video' && <Video size={14} />}
+                    {messageType === 'audio' && <Volume2 size={14} />}
+                    {messageType === 'document' && <FileText size={14} />}
+                    <span>[{uploadedFile ? uploadedFile.name : messageType.toUpperCase()}]</span>
+                  </div>
+                )}
+                <div>{renderedPreviewText || <span style={{ color: 'var(--text-muted)' }}>(No text)</span>}</div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Delay & Anti-Ban Controls */}
         <div className="divider"></div>
@@ -891,7 +1345,7 @@ export function Marketing() {
             ) : (
               <>
                 <Send size={18} />
-                Start Campaign ({targetNumbers.length} Recipient{targetNumbers.length === 1 ? '' : 's'})
+                Start Campaign ({targetContacts.length} Recipient{targetContacts.length === 1 ? '' : 's'})
               </>
             )}
           </button>
