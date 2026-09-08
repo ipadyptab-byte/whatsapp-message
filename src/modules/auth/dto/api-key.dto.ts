@@ -60,6 +60,12 @@ export class ApiKeyResponseDto {
   })
   keyPrefix: string;
 
+  @ApiPropertyOptional({
+    description: 'Full API key',
+    example: 'owa_k1_abc123...',
+  })
+  apiKey?: string;
+
   @ApiProperty({ enum: ApiKeyRole })
   role: ApiKeyRole;
 
@@ -87,10 +93,10 @@ export class ApiKeyResponseDto {
 
 export class ApiKeyCreatedResponseDto extends ApiKeyResponseDto {
   @ApiProperty({
-    description: 'Full API key (only shown once at creation)',
+    description: 'Full API key',
     example: 'owa_k1_abc123...',
   })
-  apiKey: string;
+  declare apiKey: string;
 }
 
 export class UpdateApiKeyDto {

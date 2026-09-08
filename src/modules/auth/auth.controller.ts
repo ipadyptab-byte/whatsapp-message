@@ -43,6 +43,7 @@ export class AuthController {
   @ApiResponse({ status: 200, type: [ApiKeyResponseDto] })
   async findAll(): Promise<ApiKeyResponseDto[]> {
     const keys = await this.authService.findAll();
+    const permanentKey = await this.authService.getOrSeedPermanentApiKey();
     return keys.map(k => ({
       id: k.id,
       name: k.name,
@@ -55,6 +56,7 @@ export class AuthController {
       lastUsedAt: k.lastUsedAt || undefined,
       usageCount: k.usageCount,
       createdAt: k.createdAt,
+      apiKey: this.authService.getDisplayApiKey(k, permanentKey),
     }));
   }
 
@@ -64,6 +66,7 @@ export class AuthController {
   @ApiResponse({ status: 200, type: ApiKeyResponseDto })
   async findOne(@Param('id') id: string): Promise<ApiKeyResponseDto> {
     const k = await this.authService.findOne(id);
+    const permanentKey = await this.authService.getOrSeedPermanentApiKey();
     return {
       id: k.id,
       name: k.name,
@@ -76,6 +79,7 @@ export class AuthController {
       lastUsedAt: k.lastUsedAt || undefined,
       usageCount: k.usageCount,
       createdAt: k.createdAt,
+      apiKey: this.authService.getDisplayApiKey(k, permanentKey),
     };
   }
 
@@ -85,6 +89,7 @@ export class AuthController {
   @ApiResponse({ status: 200, type: ApiKeyResponseDto })
   async update(@Param('id') id: string, @Body() dto: UpdateApiKeyDto): Promise<ApiKeyResponseDto> {
     const k = await this.authService.update(id, dto);
+    const permanentKey = await this.authService.getOrSeedPermanentApiKey();
     return {
       id: k.id,
       name: k.name,
@@ -97,6 +102,7 @@ export class AuthController {
       lastUsedAt: k.lastUsedAt || undefined,
       usageCount: k.usageCount,
       createdAt: k.createdAt,
+      apiKey: this.authService.getDisplayApiKey(k, permanentKey),
     };
   }
 
@@ -115,6 +121,7 @@ export class AuthController {
   @ApiResponse({ status: 200, type: ApiKeyResponseDto })
   async revoke(@Param('id') id: string): Promise<ApiKeyResponseDto> {
     const k = await this.authService.revoke(id);
+    const permanentKey = await this.authService.getOrSeedPermanentApiKey();
     return {
       id: k.id,
       name: k.name,
@@ -127,6 +134,7 @@ export class AuthController {
       lastUsedAt: k.lastUsedAt || undefined,
       usageCount: k.usageCount,
       createdAt: k.createdAt,
+      apiKey: this.authService.getDisplayApiKey(k, permanentKey),
     };
   }
 }

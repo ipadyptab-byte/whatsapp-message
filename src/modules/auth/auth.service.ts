@@ -53,9 +53,19 @@ export class AuthService implements OnModuleInit {
       let apiKey = await this.apiKeyRepository.findOne({ where: { keyHash } });
       if (!apiKey) {
         apiKey = await this.seedApiKey(key, 'Default Admin Key', ApiKeyRole.ADMIN);
-      } else if (!apiKey.isActive) {
-        apiKey.isActive = true;
-        await this.apiKeyRepository.save(apiKey);
+      } else {
+        let changed = false;
+        if (!apiKey.isActive) {
+          apiKey.isActive = true;
+          changed = true;
+        }
+        if (!apiKey.rawKey) {
+          apiKey.rawKey = key;
+          changed = true;
+        }
+        if (changed) {
+          await this.apiKeyRepository.save(apiKey);
+        }
       }
     } catch (err) {
       this.logger.warn('Could not ensure permanent API key in database', { error: String(err) });
@@ -78,6 +88,16 @@ export class AuthService implements OnModuleInit {
   async getCurrentAdminKey(): Promise<{ apiKey: string; role: string }> {
     const apiKey = await this.getOrSeedPermanentApiKey();
     return { apiKey, role: 'admin' };
+  }
+
+  getDisplayApiKey(apiKey: ApiKey, permanentKey?: string): string | undefined {
+    if (apiKey.rawKey) {
+      return apiKey.rawKey;
+    }
+    if (permanentKey && apiKey.keyHash === this.hashKey(permanentKey)) {
+      return permanentKey;
+    }
+    return undefined;
   }
 
   async onModuleInit(): Promise<void> {
@@ -110,6 +130,7 @@ export class AuthService implements OnModuleInit {
       name,
       keyHash,
       keyPrefix,
+      rawKey,
       role,
     });
 
@@ -126,6 +147,7 @@ export class AuthService implements OnModuleInit {
       name: dto.name,
       keyHash,
       keyPrefix,
+      rawKey,
       role: dto.role || ApiKeyRole.OPERATOR,
       allowedIps: dto.allowedIps || null,
       allowedSessions: dto.allowedSessions || null,
@@ -240,7 +262,7 @@ export class AuthService implements OnModuleInit {
     return apiKey;
   }
 
-  private hashKey(rawKey: string): string {
+  hashKey(rawKey: string): string {
     return createHash('sha256').update(rawKey).digest('hex');
   }
 

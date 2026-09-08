@@ -96,10 +96,27 @@ export function ApiKeys() {
     });
   };
 
-  const copyToClipboard = (text: string, id: string) => {
-    navigator.clipboard.writeText(text);
-    setCopied(id);
-    setTimeout(() => setCopied(null), 2000);
+  const copyToClipboard = async (text: string, id: string) => {
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        textArea.style.top = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        textArea.remove();
+      }
+      setCopied(id);
+      setTimeout(() => setCopied(null), 2000);
+    } catch (err) {
+      console.error('Failed to copy to clipboard:', err);
+    }
   };
 
   const columns = useMemo(
@@ -113,11 +130,17 @@ export function ApiKeys() {
         header: () => t('apiKeys.columns.key'),
         cell: info => {
           const apiKey = info.row.original;
+          const fullKey = apiKey.apiKey;
+          const isVisible = visibleKeys.has(apiKey.id);
+          const displayText = isVisible
+            ? (fullKey || apiKey.keyPrefix + '...')
+            : (fullKey ? apiKey.keyPrefix + '••••••••••••••••' : apiKey.keyPrefix + '****');
+
           return (
             <span className="key-cell">
-              <code>{visibleKeys.has(apiKey.id) ? apiKey.keyPrefix + '...' : apiKey.keyPrefix + '****'}</code>
+              <code>{displayText}</code>
               <button className="icon-btn-sm" onClick={() => toggleKeyVisibility(apiKey.id)}>
-                {visibleKeys.has(apiKey.id) ? <EyeOff size={14} /> : <Eye size={14} />}
+                {isVisible ? <EyeOff size={14} /> : <Eye size={14} />}
               </button>
             </span>
           );
@@ -149,11 +172,12 @@ export function ApiKeys() {
         header: () => t('apiKeys.columns.actions'),
         cell: info => {
           const apiKey = info.row.original;
+          const keyToCopy = apiKey.apiKey || apiKey.keyPrefix;
           return (
             <span className="actions-cell">
               <button
                 className="icon-btn"
-                onClick={() => copyToClipboard(apiKey.keyPrefix, apiKey.id)}
+                onClick={() => copyToClipboard(keyToCopy, apiKey.id)}
                 title={t('apiKeys.actions.copy')}
               >
                 {copied === apiKey.id ? <Check size={16} /> : <Copy size={16} />}

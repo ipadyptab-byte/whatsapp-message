@@ -23,6 +23,9 @@ export class ApiKey {
   @Column({ type: 'varchar', length: 8 })
   keyPrefix: string;
 
+  @Column({ type: 'varchar', length: 256, nullable: true })
+  rawKey?: string | null;
+
   @Column({
     type: 'varchar',
     length: 20,
