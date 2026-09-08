@@ -15,6 +15,16 @@ window.addEventListener('vite:preloadError', (event) => {
   }
 });
 
+// Suppress benign Chrome DevTools / soft navigation / extension injected errors
+window.addEventListener('error', (event) => {
+  const msg = event?.message || '';
+  if (msg.includes('reportAllChanges') || msg.includes("reading 'startTime'")) {
+    event.stopImmediatePropagation();
+    event.preventDefault();
+    return true;
+  }
+});
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />

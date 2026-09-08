@@ -3,6 +3,7 @@ import { Client, LocalAuth, MessageMedia } from 'whatsapp-web.js';
 import * as qrcode from 'qrcode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { execSync } from 'child_process';
 import { ServiceUnavailableException } from '@nestjs/common';
 import {
   IWhatsAppEngine,
@@ -107,14 +108,47 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
       }
 
       // Resolve Chromium executable path for ARM / Raspberry Pi or custom installations
-      const chromiumBinary =
-        this.config.puppeteer?.executablePath ||
-        process.env.PUPPETEER_EXECUTABLE_PATH ||
-        (fs.existsSync('/usr/bin/chromium-browser') ? '/usr/bin/chromium-browser' : undefined) ||
-        (fs.existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined);
+      let chromiumBinary: string | undefined =
+        this.config.puppeteer?.executablePath || process.env.PUPPETEER_EXECUTABLE_PATH;
+
+      if (!chromiumBinary || !fs.existsSync(chromiumBinary)) {
+        const candidatePaths = [
+          '/usr/bin/chromium-browser',
+          '/usr/bin/chromium',
+          '/usr/lib/chromium-browser/chromium-browser',
+          '/usr/lib/chromium/chromium',
+          '/snap/bin/chromium',
+          '/usr/bin/google-chrome-stable',
+          '/usr/bin/google-chrome',
+        ];
+        for (const candidate of candidatePaths) {
+          if (fs.existsSync(candidate)) {
+            chromiumBinary = candidate;
+            break;
+          }
+        }
+      }
+
+      if (!chromiumBinary && process.platform === 'linux') {
+        try {
+          const whichOutput = execSync('which chromium-browser || which chromium || which google-chrome', {
+            encoding: 'utf8',
+            stdio: ['pipe', 'pipe', 'ignore'],
+          }).trim();
+          if (whichOutput && fs.existsSync(whichOutput)) {
+            chromiumBinary = whichOutput;
+          }
+        } catch {
+          // ignore
+        }
+      }
 
       if (chromiumBinary) {
         this.logger.log(`Using Chromium executable: ${chromiumBinary}`);
+      } else if (process.platform === 'linux') {
+        this.logger.warn(
+          'No native Chromium executable found in standard paths! If running on Raspberry Pi, please run: sudo apt update && sudo apt install -y chromium-browser',
+        );
       }
 
       this.client = new Client({
@@ -125,14 +159,28 @@ export class WhatsAppWebJsAdapter extends EventEmitter implements IWhatsAppEngin
         puppeteer: {
           headless: this.config.puppeteer?.headless ?? true,
           args: puppeteerArgs,
+          timeout: 120000,
           ...(chromiumBinary ? { executablePath: chromiumBinary } : {}),
         },
+        authTimeoutMs: 120000,
+        qrMaxRetries: 10,
       });
 
       this.setupEventHandlers();
       await this.client.initialize();
     } catch (error) {
       this.setStatus(EngineStatus.FAILED);
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Engine initialization failed for ${this.config.sessionId}: ${msg}`);
+      if (
+        msg.includes('Could not find Chromium') ||
+        msg.includes('Failed to launch the browser process') ||
+        msg.includes('Exec format error')
+      ) {
+        this.logger.error(
+          'Raspberry Pi / ARM Note: Ensure native Chromium and its libraries are installed: sudo apt update && sudo apt install -y chromium-browser libnss3 libgbm1 libasound2',
+        );
+      }
       throw error;
     }
   }

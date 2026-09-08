@@ -208,8 +208,9 @@ export class SessionService implements OnModuleDestroy, OnModuleInit {
 
     const existingEngine = this.engines.get(id);
     if (existingEngine) {
-      if (existingEngine.getStatus() === EngineStatus.READY) {
-        return session;
+      const status = typeof existingEngine.getStatus === 'function' ? existingEngine.getStatus() : EngineStatus.READY;
+      if (status === EngineStatus.READY || status === EngineStatus.INITIALIZING || status === EngineStatus.AUTHENTICATING) {
+        throw new BadRequestException(`Session '${session.name}' is already started`);
       }
       // If engine exists but is not ready or failed, destroy and recreate
       try {
@@ -242,8 +243,17 @@ export class SessionService implements OnModuleDestroy, OnModuleInit {
       baseDelay: config?.reconnectBaseDelay ?? 5000,
     });
 
-    await this.initializeEngine(id, session);
-    return this.findOne(id);
+    // Mark as INITIALIZING immediately so UI updates and DB reflects state
+    await this.updateStatus(id, SessionStatus.INITIALIZING);
+
+    // Asynchronously initialize engine to prevent slow devices (e.g. Raspberry Pi)
+    // from timing out or returning HTTP 500
+    void this.initializeEngine(id, session).catch(err => {
+      this.logger.error(`Failed to initialize engine for ${session.name}:`, String(err));
+      void this.updateStatus(id, SessionStatus.FAILED, false);
+    });
+
+    return (await this.findOne(id)) ?? session;
   }
 
   private async initializeEngine(id: string, session: Session): Promise<void> {
@@ -388,8 +398,6 @@ export class SessionService implements OnModuleDestroy, OnModuleInit {
       this.engines.delete(id);
       throw err;
     }
-
-    await this.updateStatus(id, SessionStatus.INITIALIZING);
   }
 
   private scheduleReconnect(id: string, session: Session): void {
