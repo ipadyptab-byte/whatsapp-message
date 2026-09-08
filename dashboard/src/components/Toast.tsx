@@ -36,6 +36,18 @@ interface ToastProviderProps {
   children: ReactNode;
 }
 
+function generateUUID(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  // Safe fallback for non-secure HTTP contexts (e.g. LAN IP http://192.168.x.x:3000)
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 export function ToastProvider({ children }: ToastProviderProps) {
   const [toasts, setToasts] = useState<Toast[]>([]);
 
@@ -45,7 +57,7 @@ export function ToastProvider({ children }: ToastProviderProps) {
 
   const addToast = useCallback(
     (toast: Omit<Toast, 'id'>) => {
-      const id = crypto.randomUUID();
+      const id = generateUUID();
       const newToast = { ...toast, id };
       setToasts(prev => [...prev, newToast]);
 

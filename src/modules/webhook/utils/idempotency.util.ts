@@ -1,4 +1,5 @@
-import { randomUUID, createHash } from 'crypto';
+import { createHash } from 'crypto';
+import { safeRandomUUID } from '../../../common/utils/uuid.util';
 
 /**
  * Safely convert an unknown value to a string for use in idempotency keys
@@ -78,5 +79,5 @@ export function generateIdempotencyKey(event: string, data: Record<string, unkno
  * Generate a unique delivery ID for each webhook delivery attempt
  */
 export function generateDeliveryId(): string {
-  return `dlv_${randomUUID()}`;
+  return `dlv_${safeRandomUUID()}`;
 }

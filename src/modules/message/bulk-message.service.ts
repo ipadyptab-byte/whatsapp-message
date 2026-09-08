@@ -1,7 +1,7 @@
 import { Injectable, Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { randomUUID } from 'crypto';
+import { safeRandomUUID } from '../../common/utils/uuid.util';
 import {
   MessageBatch,
   BatchStatus,
@@ -41,7 +41,7 @@ export class BulkMessageService {
       throw new BadRequestException(`Session '${sessionId}' is not active`);
     }
 
-    const batchId = dto.batchId || `batch_${randomUUID().split('-')[0]}`;
+    const batchId = dto.batchId || `batch_${safeRandomUUID().split('-')[0]}`;
 
     // Check if batchId already exists
     const existing = await this.batchRepository.findOne({ where: { batchId } });
@@ -161,7 +161,7 @@ export class BulkMessageService {
 
       try {
         // Apply template variables
-        const content: BulkMessageContent = this.applyVariables(msg.content as BulkMessageContent, msg.variables);
+        const content: BulkMessageContent = this.applyVariables(msg.content, msg.variables);
 
         // Send message based on type
         const messageResult = await this.sendMessage(engine, msg.chatId, msg.type, content);

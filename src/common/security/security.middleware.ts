@@ -1,6 +1,6 @@
 import { Injectable, NestMiddleware } from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
-import { randomUUID } from 'crypto';
+import { safeRandomUUID } from '../utils/uuid.util';
 
 /**
  * Security middleware for request tracking and security headers
@@ -10,7 +10,7 @@ import { randomUUID } from 'crypto';
 export class SecurityMiddleware implements NestMiddleware {
   use(req: Request, res: Response, next: NextFunction): void {
     // Generate or use existing request ID for tracing
-    const requestId = (req.headers['x-request-id'] as string) || randomUUID();
+    const requestId = (req.headers['x-request-id'] as string) || safeRandomUUID();
     req.headers['x-request-id'] = requestId;
     res.setHeader('X-Request-ID', requestId);
 
