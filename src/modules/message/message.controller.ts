@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Param, Body, Query, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Get, Param, Body, Query, HttpCode, HttpStatus, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { MessageService } from './message.service';
 import { BulkMessageService } from './bulk-message.service';
@@ -54,6 +54,50 @@ export class MessageController {
   @ApiResponse({ status: 404, description: 'Session not found' })
   async sendText(@Param('sessionId') sessionId: string, @Body() dto: SendTextMessageDto): Promise<MessageResponseDto> {
     return this.messageService.sendText(sessionId, dto);
+  }
+
+  @Get('send-text')
+  @RequireRole(ApiKeyRole.OPERATOR)
+  @ApiOperation({ summary: 'Send a text message via GET (direct browser URL)' })
+  @ApiParam({ name: 'sessionId', description: 'Session ID' })
+  @ApiQuery({ name: 'phone', required: false, description: 'Recipient phone number (e.g. 919422039371)' })
+  @ApiQuery({ name: 'chatId', required: false, description: 'Full WhatsApp chatId (e.g. 919422039371@c.us)' })
+  @ApiQuery({ name: 'text', required: false, description: 'Message content' })
+  @ApiQuery({ name: 'message', required: false, description: 'Alternative for text parameter' })
+  @ApiQuery({ name: 'apiKey', required: false, description: 'API Key (if not provided in headers)' })
+  @ApiResponse({
+    status: 200,
+    description: 'Message sent successfully',
+    type: MessageResponseDto,
+  })
+  async sendTextGet(
+    @Param('sessionId') sessionId: string,
+    @Query('phone') phone?: string,
+    @Query('chatId') chatId?: string,
+    @Query('text') text?: string,
+    @Query('message') message?: string,
+  ): Promise<MessageResponseDto> {
+    const rawNumber = (phone || chatId || '').trim();
+    let targetChatId = '';
+    if (rawNumber.includes('@')) {
+      targetChatId = rawNumber;
+    } else if (rawNumber) {
+      targetChatId = `${rawNumber.replace(/[^0-9]/g, '')}@c.us`;
+    }
+
+    const messageContent = text ?? message ?? '';
+
+    if (!targetChatId) {
+      throw new BadRequestException('Query parameter "phone" or "chatId" is required (e.g. ?phone=919422039371)');
+    }
+    if (!messageContent) {
+      throw new BadRequestException('Query parameter "text" or "message" is required (e.g. ?text=Hi)');
+    }
+
+    return this.messageService.sendText(sessionId, {
+      chatId: targetChatId,
+      text: messageContent,
+    });
   }
 
   @Post('send-image')

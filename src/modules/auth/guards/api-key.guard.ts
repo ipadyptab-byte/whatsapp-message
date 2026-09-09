@@ -60,6 +60,10 @@ export class ApiKeyGuard implements CanActivate {
       return authHeader.substring(7);
     }
 
+    // Support query parameter (apiKey, api_key, or token) for direct browser URL requests
+    const queryKey = (request.query?.['apiKey'] || request.query?.['api_key'] || request.query?.['token']) as string;
+    if (queryKey) return queryKey;
+
     return undefined;
   }
 

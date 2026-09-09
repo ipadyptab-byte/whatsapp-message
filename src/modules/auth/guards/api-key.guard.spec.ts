@@ -26,10 +26,12 @@ function createMockApiKey(overrides: Partial<ApiKey> = {}): ApiKey {
 function createMockContext(
   headers: Record<string, string> = {},
   params: Record<string, string> = {},
+  query: Record<string, string> = {},
 ): ExecutionContext {
   const request = {
     headers,
     params,
+    query,
     ip: '127.0.0.1',
     socket: { remoteAddress: '127.0.0.1' },
   };
@@ -106,6 +108,19 @@ describe('ApiKeyGuard', () => {
 
     expect(result).toBe(true);
     expect(authService.validateApiKey).toHaveBeenCalledWith('my-bearer-key', '127.0.0.1', undefined);
+  });
+
+  it('should accept apiKey query parameter', async () => {
+    reflector.getAllAndOverride.mockReturnValueOnce(false).mockReturnValueOnce(undefined);
+
+    const apiKey = createMockApiKey();
+    (authService.validateApiKey as jest.Mock).mockResolvedValue(apiKey);
+
+    const context = createMockContext({}, {}, { apiKey: 'my-query-key' });
+    const result = await guard.canActivate(context);
+
+    expect(result).toBe(true);
+    expect(authService.validateApiKey).toHaveBeenCalledWith('my-query-key', '127.0.0.1', undefined);
   });
 
   it('should reject when API key validation fails', async () => {
