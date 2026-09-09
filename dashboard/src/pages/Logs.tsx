@@ -61,7 +61,7 @@ export function Logs() {
           <input
             type="text"
             placeholder={t('logs.searchPlaceholder')}
-            value={searchQuery}
+            value={searchQuery ?? ''}
             onChange={e => setSearchQuery(e.target.value)}
           />
         </div>
@@ -69,7 +69,7 @@ export function Logs() {
         <div className="filter-group">
           <Filter size={16} />
           <select
-            value={severityFilter}
+            value={severityFilter ?? 'all'}
             onChange={e => {
               setSeverityFilter(e.target.value);
               setPage(1);

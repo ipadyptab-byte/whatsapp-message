@@ -105,7 +105,7 @@ export function Login({ onLogin }: LoginProps) {
               <input
                 id="username"
                 type="text"
-                value={username}
+                value={username ?? ''}
                 onChange={e => setUsername(e.target.value)}
                 placeholder="Enter your username"
                 className={error ? 'error' : ''}
@@ -119,7 +119,7 @@ export function Login({ onLogin }: LoginProps) {
               <input
                 id="password"
                 type={showPassword ? 'text' : 'password'}
-                value={password}
+                value={password ?? ''}
                 onChange={e => setPassword(e.target.value)}
                 placeholder="Enter your password"
                 className={error ? 'error' : ''}

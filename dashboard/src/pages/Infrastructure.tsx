@@ -178,76 +178,77 @@ export function Infrastructure() {
     if (savedConfig.database) {
       setDbConfig(prev => ({
         ...prev,
-        type: savedConfig.database?.type || prev.type,
-        builtIn: savedConfig.database?.builtIn ?? prev.builtIn,
-        host: savedConfig.database?.host || prev.host,
-        port: savedConfig.database?.port || prev.port,
-        username: savedConfig.database?.username || prev.username,
-        password: savedConfig.database?.password !== undefined ? savedConfig.database.password : prev.password,
-        database: savedConfig.database?.database || prev.database,
-        poolSize: savedConfig.database?.poolSize ?? prev.poolSize,
-        sslEnabled: savedConfig.database?.sslEnabled ?? prev.sslEnabled,
+        type: savedConfig.database?.type || prev.type || 'sqlite',
+        builtIn: savedConfig.database?.builtIn ?? prev.builtIn ?? false,
+        host: savedConfig.database?.host ?? prev.host ?? 'localhost',
+        port: savedConfig.database?.port ?? prev.port ?? '5432',
+        username: savedConfig.database?.username ?? prev.username ?? 'postgres',
+        password: savedConfig.database?.password ?? prev.password ?? '',
+        database: savedConfig.database?.database ?? prev.database ?? 'openwa',
+        poolSize: savedConfig.database?.poolSize ?? prev.poolSize ?? 10,
+        sslEnabled: savedConfig.database?.sslEnabled ?? prev.sslEnabled ?? false,
       }));
     }
 
     if (savedConfig.redis) {
       setRedisConfig(prev => ({
         ...prev,
-        builtIn: savedConfig.redis?.builtIn ?? prev.builtIn,
-        host: savedConfig.redis?.host || prev.host,
-        port: savedConfig.redis?.port || prev.port,
-        password: savedConfig.redis?.password !== undefined ? savedConfig.redis.password : prev.password,
+        builtIn: savedConfig.redis?.builtIn ?? prev.builtIn ?? false,
+        host: savedConfig.redis?.host ?? prev.host ?? 'localhost',
+        port: savedConfig.redis?.port ?? prev.port ?? '6379',
+        password: savedConfig.redis?.password ?? prev.password ?? '',
+        connected: prev.connected ?? false,
       }));
       if (savedConfig.redis.enabled !== undefined) {
-        setRedisEnabled(savedConfig.redis.enabled);
+        setRedisEnabled(Boolean(savedConfig.redis.enabled));
       }
     }
 
     if (savedConfig.queue?.enabled !== undefined) {
-      setQueueEnabled(savedConfig.queue.enabled);
+      setQueueEnabled(Boolean(savedConfig.queue.enabled));
     }
 
     if (savedConfig.storage) {
       setStorageConfig(prev => ({
         ...prev,
-        type: savedConfig.storage?.type || prev.type,
-        builtIn: savedConfig.storage?.builtIn ?? prev.builtIn,
-        localPath: savedConfig.storage?.localPath || prev.localPath,
-        s3Bucket: savedConfig.storage?.s3Bucket || prev.s3Bucket,
-        s3Region: savedConfig.storage?.s3Region || prev.s3Region,
-        s3AccessKey: savedConfig.storage?.s3AccessKey || prev.s3AccessKey,
-        s3SecretKey: savedConfig.storage?.s3SecretKey || prev.s3SecretKey,
-        s3Endpoint: savedConfig.storage?.s3Endpoint || prev.s3Endpoint,
+        type: savedConfig.storage?.type || prev.type || 'local',
+        builtIn: savedConfig.storage?.builtIn ?? prev.builtIn ?? false,
+        localPath: savedConfig.storage?.localPath ?? prev.localPath ?? './data/media',
+        s3Bucket: savedConfig.storage?.s3Bucket ?? prev.s3Bucket ?? '',
+        s3Region: savedConfig.storage?.s3Region ?? prev.s3Region ?? 'ap-southeast-1',
+        s3AccessKey: savedConfig.storage?.s3AccessKey ?? prev.s3AccessKey ?? '',
+        s3SecretKey: savedConfig.storage?.s3SecretKey ?? prev.s3SecretKey ?? '',
+        s3Endpoint: savedConfig.storage?.s3Endpoint ?? prev.s3Endpoint ?? '',
       }));
     }
 
     if (savedConfig.server) {
       setServerConfig(prev => ({
         ...prev,
-        port: savedConfig.server?.port || prev.port,
-        nodeEnv: (savedConfig.server?.nodeEnv as 'production' | 'development') || prev.nodeEnv,
-        domain: savedConfig.server?.domain || prev.domain,
-        dashboardPort: savedConfig.server?.dashboardPort || prev.dashboardPort,
-        baseUrl: savedConfig.server?.baseUrl || prev.baseUrl,
-        dashboardUrl: savedConfig.server?.dashboardUrl || prev.dashboardUrl,
-        corsOrigins: savedConfig.server?.corsOrigins || prev.corsOrigins,
+        port: savedConfig.server?.port ?? prev.port ?? '2785',
+        nodeEnv: (savedConfig.server?.nodeEnv as 'production' | 'development') ?? prev.nodeEnv ?? 'development',
+        domain: savedConfig.server?.domain ?? prev.domain ?? 'localhost',
+        dashboardPort: savedConfig.server?.dashboardPort ?? prev.dashboardPort ?? '2886',
+        baseUrl: savedConfig.server?.baseUrl ?? prev.baseUrl ?? '',
+        dashboardUrl: savedConfig.server?.dashboardUrl ?? prev.dashboardUrl ?? '',
+        corsOrigins: savedConfig.server?.corsOrigins ?? prev.corsOrigins ?? '*',
       }));
     }
 
     if (savedConfig.webhook) {
       setWebhookConfig(prev => ({
         ...prev,
-        timeout: savedConfig.webhook?.timeout ?? prev.timeout,
-        maxRetries: savedConfig.webhook?.maxRetries ?? prev.maxRetries,
-        retryDelay: savedConfig.webhook?.retryDelay ?? prev.retryDelay,
+        timeout: savedConfig.webhook?.timeout ?? prev.timeout ?? 10000,
+        maxRetries: savedConfig.webhook?.maxRetries ?? prev.maxRetries ?? 3,
+        retryDelay: savedConfig.webhook?.retryDelay ?? prev.retryDelay ?? 5000,
       }));
     }
 
     if (savedConfig.rateLimit) {
       setRateLimitConfig(prev => ({
         ...prev,
-        ttl: savedConfig.rateLimit?.ttl ?? prev.ttl,
-        max: savedConfig.rateLimit?.max ?? prev.max,
+        ttl: savedConfig.rateLimit?.ttl ?? prev.ttl ?? 60,
+        max: savedConfig.rateLimit?.max ?? prev.max ?? 100,
       }));
     }
   }, [savedConfig]);
@@ -279,17 +280,17 @@ export function Infrastructure() {
   }
 
   const updateDbConfig = (key: keyof DatabaseConfig, value: string | number | boolean) =>
-    setDbConfig(prev => ({ ...prev, [key]: value }));
+    setDbConfig(prev => ({ ...prev, [key]: value ?? '' }));
   const updateRedisConfig = (key: keyof RedisConfig, value: string | boolean) =>
-    setRedisConfig(prev => ({ ...prev, [key]: value }));
+    setRedisConfig(prev => ({ ...prev, [key]: value ?? '' }));
   const updateStorageConfig = (key: keyof StorageConfig, value: string | boolean) =>
-    setStorageConfig(prev => ({ ...prev, [key]: value }));
+    setStorageConfig(prev => ({ ...prev, [key]: value ?? '' }));
   const updateServerConfig = (key: keyof ServerConfig, value: string) =>
-    setServerConfig(prev => ({ ...prev, [key]: value }));
+    setServerConfig(prev => ({ ...prev, [key]: value ?? '' }));
   const updateWebhookConfig = (key: keyof WebhookConfig, value: number) =>
-    setWebhookConfig(prev => ({ ...prev, [key]: value }));
+    setWebhookConfig(prev => ({ ...prev, [key]: isNaN(value) ? 0 : value }));
   const updateRateLimitConfig = (key: keyof RateLimitConfig, value: number) =>
-    setRateLimitConfig(prev => ({ ...prev, [key]: value }));
+    setRateLimitConfig(prev => ({ ...prev, [key]: isNaN(value) ? 0 : value }));
 
   const handleTestDatabase = async () => {
     setTestingDb(true);
@@ -417,7 +418,7 @@ export function Infrastructure() {
               <div className="form-group">
                 <label>{t('infrastructure.server.environment')}</label>
                 <select
-                  value={serverConfig.nodeEnv}
+                  value={serverConfig.nodeEnv ?? 'development'}
                   onChange={e => updateServerConfig('nodeEnv', e.target.value as 'production' | 'development')}
                 >
                   <option value="production">{t('infrastructure.server.production')}</option>
@@ -428,7 +429,7 @@ export function Infrastructure() {
                 <label>{t('infrastructure.server.domain')}</label>
                 <input
                   type="text"
-                  value={serverConfig.domain}
+                  value={serverConfig.domain ?? ''}
                   onChange={e => updateServerConfig('domain', e.target.value)}
                   placeholder="localhost"
                 />
@@ -437,13 +438,13 @@ export function Infrastructure() {
             <div className="form-row">
               <div className="form-group small">
                 <label>{t('infrastructure.server.apiPort')}</label>
-                <input type="text" value={serverConfig.port} onChange={e => updateServerConfig('port', e.target.value)} />
+                <input type="text" value={serverConfig.port ?? ''} onChange={e => updateServerConfig('port', e.target.value)} />
               </div>
               <div className="form-group small">
                 <label>{t('infrastructure.server.dashboardPort')}</label>
                 <input
                   type="text"
-                  value={serverConfig.dashboardPort}
+                  value={serverConfig.dashboardPort ?? ''}
                   onChange={e => updateServerConfig('dashboardPort', e.target.value)}
                 />
               </div>
@@ -451,7 +452,7 @@ export function Infrastructure() {
                 <label>{t('infrastructure.server.corsOrigins')}</label>
                 <input
                   type="text"
-                  value={serverConfig.corsOrigins}
+                  value={serverConfig.corsOrigins ?? ''}
                   onChange={e => updateServerConfig('corsOrigins', e.target.value)}
                   placeholder={t('infrastructure.server.corsPlaceholder')}
                 />
@@ -462,7 +463,7 @@ export function Infrastructure() {
                 <label>{t('infrastructure.server.publicApiUrl')}</label>
                 <input
                   type="text"
-                  value={serverConfig.baseUrl}
+                  value={serverConfig.baseUrl ?? ''}
                   onChange={e => updateServerConfig('baseUrl', e.target.value)}
                   placeholder="https://api.yourdomain.com"
                 />
@@ -471,7 +472,7 @@ export function Infrastructure() {
                 <label>{t('infrastructure.server.publicDashboardUrl')}</label>
                 <input
                   type="text"
-                  value={serverConfig.dashboardUrl}
+                  value={serverConfig.dashboardUrl ?? ''}
                   onChange={e => updateServerConfig('dashboardUrl', e.target.value)}
                   placeholder="https://dashboard.yourdomain.com"
                 />
@@ -499,7 +500,7 @@ export function Infrastructure() {
                 <label>{t('infrastructure.webhook.timeout')}</label>
                 <input
                   type="number"
-                  value={webhookConfig.timeout}
+                  value={webhookConfig.timeout ?? 10000}
                   onChange={e => updateWebhookConfig('timeout', parseInt(e.target.value) || 10000)}
                 />
               </div>
@@ -509,7 +510,7 @@ export function Infrastructure() {
                   type="number"
                   min="0"
                   max="10"
-                  value={webhookConfig.maxRetries}
+                  value={webhookConfig.maxRetries ?? 3}
                   onChange={e => updateWebhookConfig('maxRetries', parseInt(e.target.value) || 3)}
                 />
               </div>
@@ -517,7 +518,7 @@ export function Infrastructure() {
                 <label>{t('infrastructure.webhook.retryDelay')}</label>
                 <input
                   type="number"
-                  value={webhookConfig.retryDelay}
+                  value={webhookConfig.retryDelay ?? 5000}
                   onChange={e => updateWebhookConfig('retryDelay', parseInt(e.target.value) || 5000)}
                 />
               </div>
@@ -533,7 +534,7 @@ export function Infrastructure() {
                   <label>{t('infrastructure.webhook.window')}</label>
                   <input
                     type="number"
-                    value={rateLimitConfig.ttl}
+                    value={rateLimitConfig.ttl ?? 60}
                     onChange={e => updateRateLimitConfig('ttl', parseInt(e.target.value) || 60)}
                   />
                 </div>
@@ -541,7 +542,7 @@ export function Infrastructure() {
                   <label>{t('infrastructure.webhook.maxReq')}</label>
                   <input
                     type="number"
-                    value={rateLimitConfig.max}
+                    value={rateLimitConfig.max ?? 100}
                     onChange={e => updateRateLimitConfig('max', parseInt(e.target.value) || 100)}
                   />
                 </div>
@@ -607,7 +608,8 @@ export function Infrastructure() {
               <input
                 type="radio"
                 name="dbType"
-                checked={dbConfig.type === 'sqlite'}
+                value="sqlite"
+                checked={Boolean(dbConfig.type === 'sqlite')}
                 onChange={() => updateDbConfig('type', 'sqlite')}
               />
               <img src={sqliteIcon} alt="" className="watermark-icon" />
@@ -618,7 +620,8 @@ export function Infrastructure() {
               <input
                 type="radio"
                 name="dbType"
-                checked={dbConfig.type === 'postgres'}
+                value="postgres"
+                checked={Boolean(dbConfig.type === 'postgres')}
                 onChange={() => updateDbConfig('type', 'postgres')}
               />
               <img src={postgresIcon} alt="" className="watermark-icon" />
@@ -637,7 +640,7 @@ export function Infrastructure() {
                 <label className="toggle-switch">
                   <input
                     type="checkbox"
-                    checked={dbConfig.builtIn}
+                    checked={Boolean(dbConfig.builtIn)}
                     onChange={e => updateDbConfig('builtIn', e.target.checked)}
                   />
                   <span className="toggle-slider"></span>
@@ -649,11 +652,11 @@ export function Infrastructure() {
                   <div className="form-row">
                     <div className="form-group">
                       <label>{t('common.host')}</label>
-                      <input type="text" value={dbConfig.host} onChange={e => updateDbConfig('host', e.target.value)} />
+                      <input type="text" value={dbConfig.host ?? ''} onChange={e => updateDbConfig('host', e.target.value)} />
                     </div>
                     <div className="form-group small">
                       <label>{t('common.port')}</label>
-                      <input type="text" value={dbConfig.port} onChange={e => updateDbConfig('port', e.target.value)} />
+                      <input type="text" value={dbConfig.port ?? ''} onChange={e => updateDbConfig('port', e.target.value)} />
                     </div>
                   </div>
                   <div className="form-row">
@@ -661,7 +664,7 @@ export function Infrastructure() {
                       <label>{t('common.username')}</label>
                       <input
                         type="text"
-                        value={dbConfig.username}
+                        value={dbConfig.username ?? ''}
                         onChange={e => updateDbConfig('username', e.target.value)}
                       />
                     </div>
@@ -669,7 +672,7 @@ export function Infrastructure() {
                       <label>{t('common.password')}</label>
                       <input
                         type="password"
-                        value={dbConfig.password}
+                        value={dbConfig.password ?? ''}
                         onChange={e => updateDbConfig('password', e.target.value)}
                       />
                     </div>
@@ -679,7 +682,7 @@ export function Infrastructure() {
                       <label>{t('infrastructure.database.dbName')}</label>
                       <input
                         type="text"
-                        value={dbConfig.database}
+                        value={dbConfig.database ?? ''}
                         onChange={e => updateDbConfig('database', e.target.value)}
                       />
                     </div>
@@ -689,8 +692,8 @@ export function Infrastructure() {
                         type="number"
                         min="1"
                         max="50"
-                        value={dbConfig.poolSize}
-                        onChange={e => updateDbConfig('poolSize', parseInt(e.target.value))}
+                        value={dbConfig.poolSize ?? 10}
+                        onChange={e => updateDbConfig('poolSize', parseInt(e.target.value) || 10)}
                       />
                     </div>
                   </div>
@@ -702,7 +705,7 @@ export function Infrastructure() {
                     <label className="toggle-switch">
                       <input
                         type="checkbox"
-                        checked={dbConfig.sslEnabled}
+                        checked={Boolean(dbConfig.sslEnabled)}
                         onChange={e => updateDbConfig('sslEnabled', e.target.checked)}
                       />
                       <span className="toggle-slider"></span>
@@ -857,7 +860,7 @@ export function Infrastructure() {
             <label className="toggle-switch">
               <input
                 type="checkbox"
-                checked={redisEnabled}
+                checked={Boolean(redisEnabled)}
                 onChange={e => {
                   setRedisEnabled(e.target.checked);
                   if (!e.target.checked) setQueueEnabled(false);
@@ -877,7 +880,7 @@ export function Infrastructure() {
                 <label className="toggle-switch">
                   <input
                     type="checkbox"
-                    checked={redisConfig.builtIn}
+                    checked={Boolean(redisConfig.builtIn)}
                     onChange={e => updateRedisConfig('builtIn', e.target.checked)}
                   />
                   <span className="toggle-slider"></span>
@@ -891,7 +894,7 @@ export function Infrastructure() {
                       <label>{t('common.host')}</label>
                       <input
                         type="text"
-                        value={redisConfig.host}
+                        value={redisConfig.host ?? ''}
                         onChange={e => updateRedisConfig('host', e.target.value)}
                       />
                     </div>
@@ -899,7 +902,7 @@ export function Infrastructure() {
                       <label>{t('common.port')}</label>
                       <input
                         type="text"
-                        value={redisConfig.port}
+                        value={redisConfig.port ?? ''}
                         onChange={e => updateRedisConfig('port', e.target.value)}
                       />
                     </div>
@@ -907,7 +910,7 @@ export function Infrastructure() {
                       <label>{t('common.password')}</label>
                       <input
                         type="password"
-                        value={redisConfig.password}
+                        value={redisConfig.password ?? ''}
                         onChange={e => updateRedisConfig('password', e.target.value)}
                         placeholder={t('infrastructure.redis.passwordOptional')}
                       />
@@ -925,7 +928,7 @@ export function Infrastructure() {
                   <small>{t('infrastructure.redis.queueDesc')}</small>
                 </div>
                 <label className="toggle-switch">
-                  <input type="checkbox" checked={queueEnabled} onChange={e => setQueueEnabled(e.target.checked)} />
+                  <input type="checkbox" checked={Boolean(queueEnabled)} onChange={e => setQueueEnabled(e.target.checked)} />
                   <span className="toggle-slider"></span>
                 </label>
               </div>
@@ -1022,7 +1025,8 @@ export function Infrastructure() {
               <input
                 type="radio"
                 name="storageType"
-                checked={storageConfig.type === 'local'}
+                value="local"
+                checked={Boolean(storageConfig.type === 'local')}
                 onChange={() => updateStorageConfig('type', 'local')}
               />
               <img src={folderIcon} alt="" className="watermark-icon" />
@@ -1033,7 +1037,8 @@ export function Infrastructure() {
               <input
                 type="radio"
                 name="storageType"
-                checked={storageConfig.type === 's3'}
+                value="s3"
+                checked={Boolean(storageConfig.type === 's3')}
                 onChange={() => updateStorageConfig('type', 's3')}
               />
               <img src={s3Icon} alt="" className="watermark-icon" />
@@ -1048,7 +1053,7 @@ export function Infrastructure() {
                 <label>{t('infrastructure.storage.storagePath')}</label>
                 <input
                   type="text"
-                  value={storageConfig.localPath}
+                  value={storageConfig.localPath ?? ''}
                   onChange={e => updateStorageConfig('localPath', e.target.value)}
                 />
               </div>
@@ -1064,7 +1069,7 @@ export function Infrastructure() {
                   <label className="toggle-switch">
                     <input
                       type="checkbox"
-                      checked={storageConfig.builtIn}
+                      checked={Boolean(storageConfig.builtIn)}
                       onChange={e => updateStorageConfig('builtIn', e.target.checked)}
                     />
                     <span className="toggle-slider"></span>
@@ -1078,7 +1083,7 @@ export function Infrastructure() {
                         <label>{t('infrastructure.storage.bucket')}</label>
                         <input
                           type="text"
-                          value={storageConfig.s3Bucket}
+                          value={storageConfig.s3Bucket ?? ''}
                           onChange={e => updateStorageConfig('s3Bucket', e.target.value)}
                         />
                       </div>
@@ -1086,7 +1091,7 @@ export function Infrastructure() {
                         <label>{t('infrastructure.storage.region')}</label>
                         <input
                           type="text"
-                          value={storageConfig.s3Region}
+                          value={storageConfig.s3Region ?? ''}
                           onChange={e => updateStorageConfig('s3Region', e.target.value)}
                         />
                       </div>
@@ -1096,7 +1101,7 @@ export function Infrastructure() {
                         <label>{t('infrastructure.storage.accessKey')}</label>
                         <input
                           type="text"
-                          value={storageConfig.s3AccessKey}
+                          value={storageConfig.s3AccessKey ?? ''}
                           onChange={e => updateStorageConfig('s3AccessKey', e.target.value)}
                         />
                       </div>
@@ -1104,7 +1109,7 @@ export function Infrastructure() {
                         <label>{t('infrastructure.storage.secretKey')}</label>
                         <input
                           type="password"
-                          value={storageConfig.s3SecretKey}
+                          value={storageConfig.s3SecretKey ?? ''}
                           onChange={e => updateStorageConfig('s3SecretKey', e.target.value)}
                         />
                       </div>
@@ -1113,7 +1118,7 @@ export function Infrastructure() {
                       <label>{t('infrastructure.storage.endpoint')}</label>
                       <input
                         type="text"
-                        value={storageConfig.s3Endpoint}
+                        value={storageConfig.s3Endpoint ?? ''}
                         onChange={e => updateStorageConfig('s3Endpoint', e.target.value)}
                         placeholder={t('infrastructure.storage.endpointHint')}
                       />

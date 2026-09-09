@@ -513,6 +513,14 @@ export function Marketing() {
     }
   };
 
+  const handleOpenMediaFileChooser = () => {
+    setMediaSource('upload');
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+      fileInputRef.current.click();
+    }
+  };
+
   const handleRemoveMediaFile = (e: React.MouseEvent) => {
     e.stopPropagation();
     setUploadedFile(null);
@@ -772,7 +780,7 @@ export function Marketing() {
           <select
             id="session-select"
             className="session-select"
-            value={selectedSessionId}
+            value={selectedSessionId ?? ''}
             onChange={e => setSelectedSessionId(e.target.value)}
             disabled={loadingSessions || isSending}
           >
@@ -803,7 +811,8 @@ export function Marketing() {
             <input
               type="radio"
               name="inputMode"
-              checked={inputMode === 'csv'}
+              value="csv"
+              checked={Boolean(inputMode === 'csv')}
               onChange={() => setInputMode('csv')}
               className="sr-only"
               disabled={isSending}
@@ -821,7 +830,8 @@ export function Marketing() {
             <input
               type="radio"
               name="inputMode"
-              checked={inputMode === 'manual'}
+              value="manual"
+              checked={Boolean(inputMode === 'manual')}
               onChange={() => setInputMode('manual')}
               className="sr-only"
               disabled={isSending}
@@ -930,7 +940,7 @@ export function Marketing() {
               <textarea
                 id="manual-contacts"
                 placeholder="Devi Jewellers, 912162228131&#10;John Doe, 14155552671&#10;Jane Smith, 447700900077"
-                value={contactsText}
+                value={contactsText ?? ''}
                 onChange={e => setContactsText(e.target.value)}
                 className="contacts-textarea"
                 disabled={isSending}
@@ -981,23 +991,37 @@ export function Marketing() {
         {/* Media Upload Provision when type is image, video, audio, or document */}
         {messageType !== 'text' && (
           <div className="media-source-section" id="media-source-section">
+            {/* Always mounted in DOM so fileInputRef is immediately accessible on click */}
+            <input
+              ref={fileInputRef}
+              id="media-file-input"
+              type="file"
+              accept={getAcceptedMimeTypes(messageType)}
+              onChange={handleMediaFileChange}
+              style={{ display: 'none' }}
+            />
+
             <div className="form-group">
               <label>Media Source</label>
-              <div className="toggle-group">
+              <div className="toggle-group" id="media-source-toggle-group">
                 <button
                   type="button"
+                  id="media-source-upload-btn"
                   className={mediaSource === 'upload' ? 'active' : ''}
-                  onClick={() => setMediaSource('upload')}
+                  onClick={handleOpenMediaFileChooser}
                   disabled={isSending}
+                  title="Click to open file picker and choose media"
                 >
                   <UploadCloud size={16} />
                   <span>Upload File</span>
                 </button>
                 <button
                   type="button"
+                  id="media-source-url-btn"
                   className={mediaSource === 'url' ? 'active' : ''}
                   onClick={() => setMediaSource('url')}
                   disabled={isSending}
+                  title="Provide direct web URL"
                 >
                   <Link2 size={16} />
                   <span>Media URL</span>
@@ -1011,15 +1035,6 @@ export function Marketing() {
                   Upload {messageType.charAt(0).toUpperCase() + messageType.slice(1)} File (max 30MB)
                 </label>
 
-                <input
-                  ref={fileInputRef}
-                  id="media-file-input"
-                  type="file"
-                  accept={getAcceptedMimeTypes(messageType)}
-                  onChange={handleMediaFileChange}
-                  style={{ display: 'none' }}
-                />
-
                 {!uploadedFile ? (
                   <div
                     id="marketing-media-dropzone"
@@ -1027,13 +1042,13 @@ export function Marketing() {
                     onDragOver={handleMediaDragOver}
                     onDragLeave={handleMediaDragLeave}
                     onDrop={handleMediaDrop}
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={handleOpenMediaFileChooser}
                     role="button"
                     tabIndex={0}
                     onKeyDown={e => {
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
-                        fileInputRef.current?.click();
+                        handleOpenMediaFileChooser();
                       }
                     }}
                   >
@@ -1074,7 +1089,19 @@ export function Marketing() {
                     </div>
                     <button
                       type="button"
+                      className="btn-change-file"
+                      id="marketing-btn-change-file"
+                      onClick={handleOpenMediaFileChooser}
+                      title="Choose another file"
+                      disabled={isSending}
+                    >
+                      <UploadCloud size={14} />
+                      <span>Change</span>
+                    </button>
+                    <button
+                      type="button"
                       className="btn-remove-file"
+                      id="marketing-btn-remove-file"
                       onClick={handleRemoveMediaFile}
                       title="Remove file"
                       disabled={isSending}
@@ -1098,7 +1125,7 @@ export function Marketing() {
                   id="media-url-input"
                   type="url"
                   placeholder="https://example.com/media.jpg"
-                  value={mediaUrl}
+                  value={mediaUrl ?? ''}
                   onChange={e => setMediaUrl(e.target.value)}
                   className="contacts-textarea"
                   style={{ minHeight: 'unset', height: '44px' }}
@@ -1115,7 +1142,7 @@ export function Marketing() {
                   id="doc-filename"
                   type="text"
                   placeholder="e.g. Catalog-2026.pdf"
-                  value={documentFilename}
+                  value={documentFilename ?? ''}
                   onChange={e => setDocumentFilename(e.target.value)}
                   className="contacts-textarea"
                   style={{ minHeight: 'unset', height: '44px' }}
@@ -1148,7 +1175,7 @@ export function Marketing() {
             <label className="personalization-toggle-label">
               <input
                 type="checkbox"
-                checked={prefixGreeting}
+                checked={Boolean(prefixGreeting)}
                 onChange={e => setPrefixGreeting(e.target.checked)}
                 disabled={isSending}
               />
@@ -1159,7 +1186,7 @@ export function Marketing() {
               <select
                 className="session-select"
                 style={{ width: 'auto', padding: '0.25rem 0.5rem', fontSize: '0.8125rem' }}
-                value={greetingTemplate}
+                value={greetingTemplate ?? 'Hello {name},'}
                 onChange={e => setGreetingTemplate(e.target.value)}
                 disabled={isSending}
               >
@@ -1187,7 +1214,7 @@ export function Marketing() {
                   ? 'e.g. Hello {name}, your special offer is ready!'
                   : 'Add an optional caption for your media message...'
               }
-              value={message}
+              value={message ?? ''}
               onChange={e => setMessage(e.target.value)}
               className="message-textarea"
               disabled={isSending}
@@ -1211,7 +1238,7 @@ export function Marketing() {
                   <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Preview for:</span>
                   <select
                     className="live-preview-recipient-select"
-                    value={previewContactIdx}
+                    value={previewContactIdx ?? 0}
                     onChange={e => setPreviewContactIdx(Number(e.target.value))}
                   >
                     {targetContacts.slice(0, 10).map((c, i) => (
@@ -1253,7 +1280,7 @@ export function Marketing() {
             <select
               id="delay-select"
               className="session-select"
-              value={delayBetweenMessages}
+              value={delayBetweenMessages ?? 3000}
               onChange={e => setDelayBetweenMessages(Number(e.target.value))}
               disabled={isSending}
             >
@@ -1267,7 +1294,7 @@ export function Marketing() {
             <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', margin: 0 }}>
               <input
                 type="checkbox"
-                checked={randomizeDelay}
+                checked={Boolean(randomizeDelay)}
                 onChange={e => setRandomizeDelay(e.target.checked)}
                 disabled={isSending}
               />

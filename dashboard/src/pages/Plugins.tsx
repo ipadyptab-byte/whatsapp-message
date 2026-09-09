@@ -349,7 +349,7 @@ export default function Plugins() {
                     <div className="form-group">
                       <label>{t('plugins.config.engineType')}</label>
                       <select
-                        value={engineConfig.type}
+                        value={engineConfig.type ?? 'whatsapp-web.js'}
                         onChange={e => setEngineConfig({ ...engineConfig, type: e.target.value })}
                       >
                         <option value="whatsapp-web.js">WhatsApp Web.js</option>
@@ -364,7 +364,7 @@ export default function Plugins() {
                       <label className="toggle-switch">
                         <input
                           type="checkbox"
-                          checked={engineConfig.headless}
+                          checked={Boolean(engineConfig.headless)}
                           onChange={e => setEngineConfig({ ...engineConfig, headless: e.target.checked })}
                         />
                         <span className="toggle-slider"></span>
@@ -375,7 +375,7 @@ export default function Plugins() {
                       <label>{t('plugins.config.sessionDataPath')}</label>
                       <input
                         type="text"
-                        value={engineConfig.sessionDataPath}
+                        value={engineConfig.sessionDataPath ?? ''}
                         onChange={e => setEngineConfig({ ...engineConfig, sessionDataPath: e.target.value })}
                       />
                     </div>
@@ -384,7 +384,7 @@ export default function Plugins() {
                       <label>{t('plugins.config.browserArgs')}</label>
                       <input
                         type="text"
-                        value={engineConfig.browserArgs}
+                        value={engineConfig.browserArgs ?? ''}
                         onChange={e => setEngineConfig({ ...engineConfig, browserArgs: e.target.value })}
                         placeholder="--no-sandbox --disable-gpu"
                       />

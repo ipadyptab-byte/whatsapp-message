@@ -245,14 +245,14 @@ export function Sessions() {
           <input
             type="text"
             placeholder={t('sessions.searchPlaceholder')}
-            value={searchQuery}
+            value={searchQuery ?? ''}
             onChange={e => setSearchQuery(e.target.value)}
           />
         </div>
 
         <div className="filter-group">
           <Filter size={16} />
-          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+          <select value={statusFilter ?? 'all'} onChange={e => setStatusFilter(e.target.value)}>
             <option value="all">{t('sessions.filter.all')}</option>
             <option value="active">{t('sessions.filter.active')}</option>
             <option value="inactive">{t('sessions.filter.inactive')}</option>
@@ -289,7 +289,7 @@ export function Sessions() {
               <input
                 type="text"
                 placeholder={t('sessions.create.placeholder')}
-                value={newSessionName}
+                value={newSessionName ?? ''}
                 onChange={e => {
                   const value = e.target.value.toLowerCase().replace(/\s+/g, '-');
                   setNewSessionName(value);

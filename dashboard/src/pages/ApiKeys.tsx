@@ -286,11 +286,11 @@ export function ApiKeys() {
                   <input
                     type="text"
                     placeholder={t('apiKeys.namePlaceholder')}
-                    value={newKey.name}
+                    value={newKey.name ?? ''}
                     onChange={e => setNewKey({ ...newKey, name: e.target.value })}
                   />
                   <label>{t('common.role')}</label>
-                  <select value={newKey.role} onChange={e => setNewKey({ ...newKey, role: e.target.value })}>
+                  <select value={newKey.role ?? 'admin'} onChange={e => setNewKey({ ...newKey, role: e.target.value })}>
                     {roleNames.map(r => (
                       <option key={r} value={r}>
                         {t(`apiKeys.roles.${r}`)}

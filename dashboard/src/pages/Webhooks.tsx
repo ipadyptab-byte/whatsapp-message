@@ -223,7 +223,7 @@ export function Webhooks() {
             <div className="modal-body">
               <label>{t('webhooks.session')}</label>
               <select
-                value={newWebhook.sessionId}
+                value={newWebhook.sessionId ?? ''}
                 onChange={e => setNewWebhook({ ...newWebhook, sessionId: e.target.value })}
               >
                 <option value="">{t('webhooks.selectSession')}</option>
@@ -237,7 +237,7 @@ export function Webhooks() {
               <input
                 type="url"
                 placeholder="https://..."
-                value={newWebhook.url}
+                value={newWebhook.url ?? ''}
                 onChange={e => setNewWebhook({ ...newWebhook, url: e.target.value })}
               />
               <label>{t('webhooks.events')}</label>
@@ -279,7 +279,7 @@ export function Webhooks() {
               <label>{t('common.url')}</label>
               <input
                 type="url"
-                value={editWebhook.url}
+                value={editWebhook.url ?? ''}
                 onChange={e => setEditWebhook({ ...editWebhook, url: e.target.value })}
               />
               <label>{t('webhooks.events')}</label>
@@ -300,7 +300,7 @@ export function Webhooks() {
                 <label className="toggle-switch">
                   <input
                     type="checkbox"
-                    checked={editWebhook.active}
+                    checked={Boolean(editWebhook.active)}
                     onChange={e => setEditWebhook({ ...editWebhook, active: e.target.checked })}
                   />
                   <span className="toggle-slider"></span>

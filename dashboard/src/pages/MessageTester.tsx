@@ -195,6 +195,15 @@ export function MessageTester() {
     }
   };
 
+  const handleOpenMediaFileChooser = () => {
+    setMediaSource('upload');
+    setFileError(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+      fileInputRef.current.click();
+    }
+  };
+
   const handleRemoveFile = (e: React.MouseEvent) => {
     e.stopPropagation();
     setUploadedFile(null);
@@ -316,7 +325,7 @@ export function MessageTester() {
 
           <div className="form-group">
             <label>{t('messageTester.session')}</label>
-            <select id="session-select" value={session} onChange={e => setSession(e.target.value)}>
+            <select id="session-select" value={session ?? ''} onChange={e => setSession(e.target.value)}>
               {sessions.length === 0 && <option value="">{t('messageTester.noReadySessions')}</option>}
               {sessions.map(s => (
                 <option key={s.id} value={s.id}>
@@ -354,7 +363,7 @@ export function MessageTester() {
               <>
                 <select
                   id="group-select"
-                  value={selectedGroup}
+                  value={selectedGroup ?? ''}
                   onChange={e => setSelectedGroup(e.target.value)}
                   disabled={loadingGroups || groups.length === 0}
                 >
@@ -373,7 +382,7 @@ export function MessageTester() {
                 <input
                   id="recipient-phone-input"
                   type="text"
-                  value={recipient}
+                  value={recipient ?? ''}
                   onChange={e => setRecipient(e.target.value)}
                   placeholder="1234567890"
                 />
@@ -404,7 +413,7 @@ export function MessageTester() {
               <label>{t('messageTester.messageContent')}</label>
               <textarea
                 id="message-text-content"
-                value={content}
+                value={content ?? ''}
                 onChange={e => setContent(e.target.value)}
                 placeholder={t('messageTester.messagePlaceholder')}
                 rows={5}
@@ -412,17 +421,25 @@ export function MessageTester() {
             </div>
           ) : (
             <>
+              {/* Always mounted in DOM so fileInputRef is immediately accessible on click */}
+              <input
+                ref={fileInputRef}
+                id="file-upload-input"
+                type="file"
+                accept={getAcceptedMimeTypes(messageType)}
+                onChange={handleFileChange}
+                style={{ display: 'none' }}
+              />
+
               <div className="form-group">
                 <label>{t('messageTester.mediaSource')}</label>
-                <div className="toggle-group">
+                <div className="toggle-group" id="message-tester-media-toggle-group">
                   <button
                     type="button"
                     id="media-source-upload-btn"
                     className={mediaSource === 'upload' ? 'active' : ''}
-                    onClick={() => {
-                      setMediaSource('upload');
-                      setFileError(null);
-                    }}
+                    onClick={handleOpenMediaFileChooser}
+                    title={t('messageTester.uploadFile')}
                   >
                     <UploadCloud size={16} />
                     <span>{t('messageTester.uploadFile')}</span>
@@ -435,6 +452,7 @@ export function MessageTester() {
                       setMediaSource('url');
                       setFileError(null);
                     }}
+                    title={t('messageTester.mediaUrlOption')}
                   >
                     <Link2 size={16} />
                     <span>{t('messageTester.mediaUrlOption')}</span>
@@ -449,15 +467,6 @@ export function MessageTester() {
                     {t('messageTester.uploadFile')})
                   </label>
 
-                  <input
-                    ref={fileInputRef}
-                    id="file-upload-input"
-                    type="file"
-                    accept={getAcceptedMimeTypes(messageType)}
-                    onChange={handleFileChange}
-                    style={{ display: 'none' }}
-                  />
-
                   {!uploadedFile ? (
                     <div
                       id="media-dropzone"
@@ -465,13 +474,13 @@ export function MessageTester() {
                       onDragOver={handleDragOver}
                       onDragLeave={handleDragLeave}
                       onDrop={handleDrop}
-                      onClick={() => fileInputRef.current?.click()}
+                      onClick={handleOpenMediaFileChooser}
                       role="button"
                       tabIndex={0}
                       onKeyDown={e => {
                         if (e.key === 'Enter' || e.key === ' ') {
                           e.preventDefault();
-                          fileInputRef.current?.click();
+                          handleOpenMediaFileChooser();
                         }
                       }}
                     >
@@ -508,6 +517,16 @@ export function MessageTester() {
                           <span className="file-badge">{uploadedFile.type.split('/')[1] || uploadedFile.type}</span>
                         </div>
                       </div>
+                      <button
+                        type="button"
+                        id="btn-change-file"
+                        className="btn-change-file"
+                        onClick={handleOpenMediaFileChooser}
+                        title="Choose another file"
+                      >
+                        <UploadCloud size={14} />
+                        <span>Change</span>
+                      </button>
                       <button
                         type="button"
                         id="btn-remove-file"
@@ -565,7 +584,7 @@ export function MessageTester() {
                   <input
                     id="media-url-input"
                     type="text"
-                    value={mediaUrl}
+                    value={mediaUrl ?? ''}
                     onChange={e => setMediaUrl(e.target.value)}
                     placeholder="https://example.com/file.jpg"
                   />
@@ -581,7 +600,7 @@ export function MessageTester() {
                   <input
                     id="media-content-input"
                     type="text"
-                    value={content}
+                    value={content ?? ''}
                     onChange={e => setContent(e.target.value)}
                     placeholder={
                       messageType === 'document'
